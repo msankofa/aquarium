@@ -37,6 +37,16 @@ The page and its transitive module closure, the assets it actually loads, and it
 - **`docs/subsystems/aquarium.md`** — the reference doc: the invariants, why the policy is
   deterministic, how species and habits are separated, and what each control is allowed to reach.
 
+## On GitHub Pages
+
+Published at <https://msankofa.github.io/aquarium/>, which redirects to `aquarium.html`. WebGPU
+means Chrome or Edge.
+
+Everything the tank draws is static, so it runs there — but **saving is off**: the page persists
+through `serve.py`'s `/api/save-aquarium`, which a static host does not have. A missing stock file
+is tolerated silently, so the tank opens on its defaults and web storage becomes the fallback;
+saves report a failure in the status line. Run it locally if you want your tuning kept.
+
 ## Saving
 
 Anything tuned in the page is saved to `aquarium-stock.json` through `serve.py`, not to
