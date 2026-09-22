@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "glintsail",
+  "type": "fish",
+  "seed": 30193,
+  "geometry": {
+    "body": {
+      "segments": 4,
+      "length": 0.266,
+      "radiusProfile": [
+        0.251,
+        0.525,
+        0.102
+      ],
+      "taper": 1.69,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 2,
+      "shape": "triangle",
+      "span": 0.292,
+      "chord": 0.0414,
+      "sweep": 0.82,
+      "dihedral": 0.45,
+      "attach": 0.89,
+      "splitAngle": 0.62
+    },
+    "tail": {
+      "shape": "lance",
+      "length": 0.209,
+      "spread": 0.28
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.29
+      },
+      "pectoral": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 0.52,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 9728044,
+    "accent": 9869865,
+    "pattern": "spots",
+    "patternCount": 2
+  },
+  "motion": {
+    "wingFreq": 0.43,
+    "wingAmplitude": 0.36,
+    "bodyWaveFreq": 1.01,
+    "bodyWaveAmp": 0.012,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

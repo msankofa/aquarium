@@ -1,0 +1,13 @@
+{
+  "name": "aquarium",
+  "private": true,
+  "type": "module",
+  "description": "A glass tank of fish: a deterministic simulation under a WebGPU renderer.",
+  "scripts": {
+    "serve": "python serve.py",
+    "test": "node run-tests.mjs"
+  },
+  "devDependencies": {
+    "three": "^0.184.0"
+  }
+}

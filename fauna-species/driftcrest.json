@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "driftcrest",
+  "type": "fish",
+  "seed": 30807,
+  "geometry": {
+    "body": {
+      "segments": 4,
+      "length": 1.003,
+      "radiusProfile": [
+        0.27,
+        1.296,
+        0.148
+      ],
+      "taper": 1.14,
+      "flatten": "none"
+    },
+    "wings": {
+      "count": 2,
+      "shape": "triangle",
+      "span": 0.5076,
+      "chord": 0.0915,
+      "sweep": 0.37,
+      "dihedral": 0.57,
+      "attach": 0.35,
+      "splitAngle": 0.73
+    },
+    "tail": {
+      "shape": "fan",
+      "length": 0.619,
+      "spread": 0.32
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.94
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.31
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 0.56,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 1595460,
+    "accent": 12502141,
+    "pattern": "gradient",
+    "patternCount": 9
+  },
+  "motion": {
+    "wingFreq": 1.47,
+    "wingAmplitude": 0.37,
+    "bodyWaveFreq": 0.62,
+    "bodyWaveAmp": 0.0764,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

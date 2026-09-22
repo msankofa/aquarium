@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "vanegill",
+  "type": "fish",
+  "seed": 31442,
+  "geometry": {
+    "body": {
+      "segments": 7,
+      "length": 0.921,
+      "radiusProfile": [
+        0.268,
+        0.793,
+        0.39
+      ],
+      "taper": 0.94,
+      "flatten": "none"
+    },
+    "wings": {
+      "count": 0,
+      "shape": "oval",
+      "span": 0.01,
+      "chord": 0.01,
+      "sweep": 0.49,
+      "dihedral": 0.3,
+      "attach": 0.54,
+      "splitAngle": 0.79
+    },
+    "tail": {
+      "shape": "none",
+      "length": 0,
+      "spread": 0
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "pectoral": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "caudal": {
+        "enabled": true,
+        "size": 0.44
+      }
+    },
+    "head": {
+      "scale": 1.37,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 6918506,
+    "accent": 11960160,
+    "pattern": "bands",
+    "patternCount": 5
+  },
+  "motion": {
+    "wingFreq": 0,
+    "wingAmplitude": 0,
+    "bodyWaveFreq": 1.81,
+    "bodyWaveAmp": 0.0441,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "chalkperch",
+  "type": "fish",
+  "seed": 30002,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.37,
+      "radiusProfile": [
+        0.617,
+        0.512,
+        0.486
+      ],
+      "taper": 0.76,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 2,
+      "shape": "oval",
+      "span": 0.3621,
+      "chord": 0.1291,
+      "sweep": 0.51,
+      "dihedral": 0.36,
+      "attach": 0.83,
+      "splitAngle": 0.57
+    },
+    "tail": {
+      "shape": "none",
+      "length": 0,
+      "spread": 0
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.95
+      },
+      "pectoral": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "caudal": {
+        "enabled": true,
+        "size": 0.54
+      }
+    },
+    "head": {
+      "scale": 1.4,
+      "eyeDots": false,
+      "beakLength": 0.027
+    }
+  },
+  "color": {
+    "base": 1263660,
+    "accent": 10721642,
+    "pattern": "none",
+    "patternCount": 4
+  },
+  "motion": {
+    "wingFreq": 2.2,
+    "wingAmplitude": 0.1,
+    "bodyWaveFreq": 1.14,
+    "bodyWaveAmp": 0.0201,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

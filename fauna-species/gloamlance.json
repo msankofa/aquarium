@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "gloamlance",
+  "type": "fish",
+  "seed": 30801,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.955,
+      "radiusProfile": [
+        0.66,
+        1.218,
+        0.383
+      ],
+      "taper": 0.85,
+      "flatten": "lateral"
+    },
+    "wings": {
+      "count": 2,
+      "shape": "triangle",
+      "span": 1.0185,
+      "chord": 0.0837,
+      "sweep": 0.45,
+      "dihedral": -0.25,
+      "attach": 0.32,
+      "splitAngle": 0.92
+    },
+    "tail": {
+      "shape": "fan",
+      "length": 0.663,
+      "spread": 0.95
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.33
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 1.32,
+      "eyeDots": true,
+      "beakLength": 0.221
+    }
+  },
+  "color": {
+    "base": 3945033,
+    "accent": 8281790,
+    "pattern": "none",
+    "patternCount": 10
+  },
+  "motion": {
+    "wingFreq": 0.88,
+    "wingAmplitude": 0.29,
+    "bodyWaveFreq": 2.85,
+    "bodyWaveAmp": 0.0302,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

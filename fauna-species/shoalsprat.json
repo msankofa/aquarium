@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "shoalsprat",
+  "type": "fish",
+  "seed": 30200,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.289,
+      "radiusProfile": [
+        0.208,
+        0.859,
+        0.127
+      ],
+      "taper": 0.92,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 2,
+      "shape": "forked",
+      "span": 0.4031,
+      "chord": 0.0674,
+      "sweep": 0.54,
+      "dihedral": -0.35,
+      "attach": 0.59,
+      "splitAngle": 0.44
+    },
+    "tail": {
+      "shape": "none",
+      "length": 0,
+      "spread": 0
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.27
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.25
+      },
+      "caudal": {
+        "enabled": true,
+        "size": 0.69
+      }
+    },
+    "head": {
+      "scale": 0.84,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 5278760,
+    "accent": 10498609,
+    "pattern": "bands",
+    "patternCount": 8
+  },
+  "motion": {
+    "wingFreq": 2.16,
+    "wingAmplitude": 0.47,
+    "bodyWaveFreq": 0.92,
+    "bodyWaveAmp": 0.0206,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

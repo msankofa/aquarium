@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "tidegill",
+  "type": "fish",
+  "seed": 30325,
+  "geometry": {
+    "body": {
+      "segments": 4,
+      "length": 0.122,
+      "radiusProfile": [
+        0.217,
+        1.208,
+        0.229
+      ],
+      "taper": 1.58,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 2,
+      "shape": "oval",
+      "span": 0.0404,
+      "chord": 0.012,
+      "sweep": 0.01,
+      "dihedral": -0.36,
+      "attach": 0.25,
+      "splitAngle": 0.59
+    },
+    "tail": {
+      "shape": "fork",
+      "length": 0.09,
+      "spread": 0.56
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.9
+      },
+      "pectoral": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 0.68,
+      "eyeDots": false,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 7444586,
+    "accent": 9855875,
+    "pattern": "spots",
+    "patternCount": 8
+  },
+  "motion": {
+    "wingFreq": 1.89,
+    "wingAmplitude": 0.58,
+    "bodyWaveFreq": 1.65,
+    "bodyWaveAmp": 0.0053,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

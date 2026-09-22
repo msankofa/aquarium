@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "chalksail",
+  "type": "fish",
+  "seed": 31190,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.111,
+      "radiusProfile": [
+        0.415,
+        1.057,
+        0.416
+      ],
+      "taper": 1.3,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "triangle",
+      "span": 0.0494,
+      "chord": 0.0101,
+      "sweep": 0.05,
+      "dihedral": -0.32,
+      "attach": 0.65,
+      "splitAngle": 1.18
+    },
+    "tail": {
+      "shape": "lance",
+      "length": 0.039,
+      "spread": 0.87
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.21
+      },
+      "pectoral": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 1.18,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 7025010,
+    "accent": 7381869,
+    "pattern": "gradient",
+    "patternCount": 8
+  },
+  "motion": {
+    "wingFreq": 1.79,
+    "wingAmplitude": 0.36,
+    "bodyWaveFreq": 2.88,
+    "bodyWaveAmp": 0.0043,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

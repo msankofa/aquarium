@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "coralscale",
+  "type": "fish",
+  "seed": 30052,
+  "geometry": {
+    "body": {
+      "segments": 4,
+      "length": 0.201,
+      "radiusProfile": [
+        0.897,
+        0.503,
+        0.139
+      ],
+      "taper": 1.57,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "triangle",
+      "span": 0.1339,
+      "chord": 0.0956,
+      "sweep": 0.85,
+      "dihedral": 0.18,
+      "attach": 0.24,
+      "splitAngle": 0.42
+    },
+    "tail": {
+      "shape": "lance",
+      "length": 0.082,
+      "spread": 0.78
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.45
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.42
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 0.98,
+      "eyeDots": false,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 6708615,
+    "accent": 11694228,
+    "pattern": "bands",
+    "patternCount": 8
+  },
+  "motion": {
+    "wingFreq": 2.32,
+    "wingAmplitude": 0.67,
+    "bodyWaveFreq": 1.61,
+    "bodyWaveAmp": 0.0047,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

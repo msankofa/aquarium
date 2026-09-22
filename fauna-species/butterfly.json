@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "name": "butterfly",
+  "type": "butterfly",
+  "seed": 1,
+  "geometry": {
+    "body": {
+      "segments": 3,
+      "length": 0.05,
+      "radiusProfile": [
+        0.25,
+        0.8,
+        0.3
+      ],
+      "taper": 1.2,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "oval",
+      "span": 0.045,
+      "chord": 0.04,
+      "sweep": 0.1,
+      "dihedral": 0.25,
+      "attach": 0.4,
+      "splitAngle": 0.55
+    },
+    "tail": {
+      "shape": "none",
+      "length": 0,
+      "spread": 0
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": false,
+        "size": 0.5
+      },
+      "pectoral": {
+        "enabled": false,
+        "size": 0.35
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.8
+      }
+    },
+    "head": {
+      "scale": 1.1,
+      "eyeDots": false,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 2825518,
+    "accent": 14979132,
+    "pattern": "spots",
+    "patternCount": 4
+  },
+  "motion": {
+    "wingFreq": 9,
+    "wingAmplitude": 1.15,
+    "bodyWaveFreq": 0,
+    "bodyWaveAmp": 0,
+    "bankFactor": 0.35,
+    "flutterNoise": 0.75
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      1.6,
+      0.9,
+      1.6
+    ],
+    "speed": 1.1,
+    "turnRate": 2.2,
+    "maxBank": 0.4
+  },
+  "habitat": {
+    "clearance": 0.3,
+    "bandLow": 0.4,
+    "bandHigh": 3,
+    "homeSizeMax": 20
+  }
+}

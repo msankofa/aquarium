@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "kelpsail",
+  "type": "fish",
+  "seed": 30158,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.134,
+      "radiusProfile": [
+        0.522,
+        0.636,
+        0.081
+      ],
+      "taper": 0.93,
+      "flatten": "lateral"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "swept",
+      "span": 0.1814,
+      "chord": 0.0132,
+      "sweep": 0.22,
+      "dihedral": 0.14,
+      "attach": 0.22,
+      "splitAngle": 0.99
+    },
+    "tail": {
+      "shape": "fan",
+      "length": 0.048,
+      "spread": 0.62
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.9
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.32
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 1.1,
+      "eyeDots": true,
+      "beakLength": 0.032
+    }
+  },
+  "color": {
+    "base": 6113926,
+    "accent": 7189868,
+    "pattern": "spots",
+    "patternCount": 10
+  },
+  "motion": {
+    "wingFreq": 1.81,
+    "wingAmplitude": 0.67,
+    "bodyWaveFreq": 2.06,
+    "bodyWaveAmp": 0.0072,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

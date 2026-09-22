@@ -1,0 +1,3813 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Aquarium</title>
+<style>
+  body { margin: 0; background: #0e1114; color: #d8dde6; font: 13px/1.5 system-ui, sans-serif; }
+  canvas { display: block; }
+  #panel { position: fixed; top: 0; right: 0; width: 320px; height: 100vh;
+           background: #1b1e24; border-left: 1px solid #2a2f38; box-sizing: border-box;
+           display: flex; flex-direction: column; }
+  #panel h2 { font-size: 13px; margin: 14px 0 6px; color: #9aa4b2; text-transform: uppercase; letter-spacing: .06em; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 6px;
+                padding: 10px 12px; border-bottom: 1px solid #2a2f38; flex: 0 0 auto; }
+  .panel-head .title { color: #e8edf5; font-weight: 600; letter-spacing: .04em; }
+  .panel-head button { padding: 3px 7px; font-size: 11px; }
+  #panelScroll { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; }
+  #panelTabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 6px 6px 0; flex: 0 0 auto; }
+  #panelTabs button { padding: 5px 2px; font-size: 10px; border-radius: 4px 4px 0 0; }
+  #panelTabs button.active { background: #3a4655; color: #f0f4fa; border-color: #4a596b; }
+  .tab-pane[hidden] { display: none !important; }
+  /* Minimised: the button, and nothing else at all.
+     `width: auto` alone still left a full-height bar down the side -- the panel's own background,
+     its border, the head's padding and rule, and the Open/Close buttons. Height goes to auto too,
+     or the panel keeps covering the right edge of the tank with an invisible box that still eats
+     the drag events OrbitControls wants.
+     The rule is written as "every child except the button", not as a list of things to hide, so a
+     control added to the head later cannot quietly reappear here. */
+  #panel.min { width: auto; height: auto; background: none; border-left: none; }
+  #panel.min #panelScroll { display: none; }
+  #panel.min #panelTabs { display: none; }
+  #panel.min .panel-head { padding: 6px; border-bottom: none; }
+  #panel.min .panel-head > :not(#panelMin) { display: none; }
+  /* The repo's collapsible-section idiom, from workshop-panel-theme.js: a .sec card whose head
+     toggles .collapsed. The behaviour is imported; only the palette is the tank's own, because that
+     module ships a light theme and this panel is dark. */
+  .cluster { color: #6f7885; font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+             margin: 14px 0 5px; }
+  .cluster:first-child { margin-top: 2px; }
+  .sec { margin-bottom: 6px; border: 1px solid #2a2f38; border-radius: 5px; overflow: hidden;
+         background: #20242b; }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+              padding: 7px 9px; color: #c3ccd9; font-weight: 600; border-bottom: 1px solid #282d36; }
+  .sec-head:hover { background: #262b33; color: #e8edf5; }
+  .sec-head .caret { color: #6a8fb0; font-size: 10px; transition: transform .18s ease; }
+  .sec.collapsed .caret { transform: rotate(-90deg); }
+  .sec.collapsed .sec-head { border-bottom: 0; }
+  /* display:none, not max-height:0 -- a hidden slider that is still laid out costs layout on every
+     frame behind a live canvas. */
+  .sec.collapsed .sec-body { display: none; }
+  .sec-body { padding: 8px 9px 2px; }
+  .sec .sec { margin: 4px 0; background: #23282f; }
+  .sec .sec-head { padding: 5px 8px; font-weight: 500; font-size: 12px; }
+  button { background: #2a2f38; color: #d8dde6; border: 1px solid #3a404b; padding: 6px 12px; cursor: pointer; }
+  button:hover { background: #333946; }
+  .row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
+  .fish { border-bottom: 1px solid #23272f; padding: 5px 0; }
+  .fish .name { color: #e8edf5; }
+  .fish .intent { color: #8fb8a0; }
+  .stat { display: flex; justify-content: space-between; font-size: 12px; color: #9aa4b2; }
+  .stat span:last-child { color: #c3ccd9; }
+  .bar { height: 4px; background: #23272f; margin: 2px 0; }
+  .bar i { display: block; height: 100%; background: #6a8fb0; }
+  .legend { color: #9aa4b2; font-size: 12px; line-height: 1.6; }
+  .sub { border-left: 2px solid #2a3340; padding-left: 8px; margin: 0 0 10px 2px; }
+  .subhead { color: #8b95a3; font-size: 11px; margin-bottom: 6px; }
+  .species { border-bottom: 1px solid #23272f; padding: 6px 0; }
+  .species .who { color: #e8edf5; display: flex; justify-content: space-between; }
+  .species .who span:last-child { color: #8fb8a0; font-size: 12px; }
+  .species label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #9aa4b2; }
+  .species input[type=range] { width: 108px; }
+  select { background: #2a2f38; color: #d8dde6; border: 1px solid #3a404b; padding: 3px 5px;
+           font: inherit; }
+</style>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+} }
+</script>
+
+<div id="panel">
+  <div class="panel-head">
+    <span class="title">Aquarium</span>
+    <span class="head-tools">
+      <button id="expandAll" title="Open every section">Open</button>
+      <button id="collapseAll" title="Close every section">Close</button>
+    </span>
+    <button id="panelMin" title="Minimise the panel">–</button>
+  </div>
+  <div id="panelTabs" aria-label="Aquarium panels"></div>
+  <div id="panelScroll">
+    <div id="tabTank" class="tab-pane"><div id="sections"></div></div>
+    <div id="tabNeural" class="tab-pane" hidden></div>
+    <div id="tabCompare" class="tab-pane" hidden></div>
+    <div id="tabExperiments" class="tab-pane" hidden></div>
+  </div>
+
+  <!-- Every control group is authored here in reading order and MOVED into a section by
+       SECTION_PLAN. That is bot-viewer-v3.html's arrangement (its comment at SECTION_PLAN says
+       the same): the markup keeps the order that makes sense to read, the panel renders in the
+       order that makes sense to use, and neither has to follow the other. -->
+  <div id="groups" hidden>
+    <div data-group="tank">
+      <div class="row">
+        <button id="play">Pause</button>
+        <button id="feed">Feed</button>
+        <button id="reset">Reset</button>
+      </div>
+      <div class="row">
+        <label>Seed <input id="seed" type="number" min="1" step="1" value="3" style="width:56px"></label>
+        <label>Fish <input id="count" type="number" min="0" max="60" step="1" value="6" style="width:44px"></label>
+      </div>
+      <div class="row">
+        <select id="addSpecies" style="flex:1"></select>
+        <button id="addFish">Add</button>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="navdots"> Show nav points</label>
+      </div>
+      <div id="save" class="legend"></div>
+    </div>
+
+    <div data-group="lamp">
+      <div class="row">
+        <label><input type="checkbox" id="lampOn"> Lamp on</label>
+        <label><input type="checkbox" id="lampShadows"> Shadows</label>
+        <label><input type="checkbox" id="lampFixture"> Show fixture</label>
+      </div>
+      <div class="row"><label>Brightness <input id="lampIntensity" type="range" min="0" max="20" step="0.1"></label><span id="lampIntensityVal"></span></div>
+      <div class="row"><label>Colour <input id="lampColor" type="color"></label></div>
+      <div class="row"><label>Height <input id="lampHeight" type="range" min="-0.45" max="0.6" step="0.005"></label><span id="lampHeightVal"></span></div>
+      <div class="row"><label>Left–right <input id="lampX" type="range" min="-0.8" max="0.8" step="0.005"></label><span id="lampXVal"></span></div>
+      <div class="row"><label>Front–back <input id="lampZ" type="range" min="-0.5" max="0.5" step="0.005"></label><span id="lampZVal"></span></div>
+      <div class="row"><label>Beam angle <input id="lampAngle" type="range" min="5" max="85" step="1"></label><span id="lampAngleVal"></span></div>
+      <div class="row"><label>Beam softness <input id="lampPenumbra" type="range" min="0" max="1" step="0.01"></label><span id="lampPenumbraVal"></span></div>
+      <div class="row"><label>Caustics from <select id="causticSource"><option value="sun">Sun</option><option value="lamp">Lamp</option></select></label></div>
+      <div class="row"><button id="lampReset">Reset</button></div>
+    </div>
+
+    <div data-group="light">
+      <div class="row"><label>Elevation <input id="elevation" type="range" min="5" max="90" step="1"></label><span id="elevationVal"></span></div>
+      <div class="row"><label>Azimuth <input id="azimuth" type="range" min="-180" max="180" step="1"></label><span id="azimuthVal"></span></div>
+      <div class="row"><label>Sun <input id="sunIntensity" type="range" min="0" max="8" step="0.05"></label><span id="sunIntensityVal"></span></div>
+      <div class="row"><label>Ambient <input id="ambientIntensity" type="range" min="0" max="2" step="0.01"></label><span id="ambientIntensityVal"></span></div>
+      <div class="row">
+        <label>Sun colour <input id="sunColor" type="color" value="#fff6e8"></label>
+        <label><input type="checkbox" id="shadows" checked> Sun shadows</label>
+      </div>
+      <div class="row"><label><input id="causticsEnabled" type="checkbox" checked> Caustics</label></div>
+      <div class="row"><label>Caustic strength <input id="causticStrength" type="range" min="0" max="3" step="0.02"></label><span id="causticStrengthVal"></span></div>
+      <div class="row"><label>Caustic spread <input id="causticSpread" type="range" min="0.002" max="2" step="0.002"></label><span id="causticSpreadVal"></span></div>
+      <div class="row"><label>Caustic speed <input id="causticMotion" type="range" min="0" max="2" step="0.01"></label><span id="causticMotionVal"></span></div>
+      <div class="row"><label>Caustic width <input id="causticWidth" type="range" min="0.5" max="3" step="0.02"></label><span id="causticWidthVal"></span></div>
+    </div>
+
+    <div data-group="water">
+      <div class="row"><label>Density <input id="fogDensity" type="range" min="0" max="6" step="0.05"></label><span id="fogDensityVal"></span></div>
+      <div class="row"><label>Max fog <input id="fogMax" type="range" min="0" max="1" step="0.01"></label><span id="fogMaxVal"></span></div>
+      <div class="row"><label>Clarity <input id="clarity" type="range" min="0.01" max="60" step="0.01"></label><span id="clarityVal"></span></div>
+      <div class="row"><label>Depth scale <input id="depthScale" type="range" min="0.01" max="8" step="0.01"></label><span id="depthScaleVal"></span></div>
+      <div class="row"><label>Glass <input id="glassOpacity" type="range" min="0" max="1" step="0.01"></label><span id="glassOpacityVal"></span></div>
+      <div class="row"><label>Surface <input id="surfaceOpacity" type="range" min="0" max="1" step="0.01"></label><span id="surfaceOpacityVal"></span></div>
+      <div class="row">
+        <label><input type="checkbox" id="rippleEnabled"> Ripples</label>
+        <label><input type="checkbox" id="rippleGlint"> Ripple glints</label>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="rippleCaustics"> Ripple caustics</label>
+        <label><input type="checkbox" id="rippleBubbleRide"> Bubbles ride the surface</label>
+      </div>
+      <div class="row"><label>Ripple strength <input id="rippleStrength" type="range" min="0" max="3" step="0.05"></label><span id="rippleStrengthVal"></span></div>
+      <div class="row"><label>Ripple damping <input id="rippleDamping" type="range" min="0.05" max="3" step="0.05"></label><span id="rippleDampingVal"></span></div>
+      <div class="row"><label>Ripple speed <input id="rippleSpeed" type="range" min="0.1" max="2" step="0.05"></label><span id="rippleSpeedVal"></span></div>
+      <div class="row"><label>Ripple substeps <input id="rippleSubsteps" type="range" min="1" max="6" step="1"></label><span id="rippleSubstepsVal"></span></div>
+      <div class="row">
+        <label>Shallow <input id="shallow" type="color"></label>
+        <label>Deep <input id="deep" type="color"></label>
+        <label>Fog <input id="fogColor" type="color"></label>
+      </div>
+      <div class="row">
+        <button id="waterClean">Clean</button>
+        <button id="waterMurky">Murky</button>
+        <button id="waterReset">Reset</button>
+      </div>
+    </div>
+
+    <div data-group="size">
+      <div class="row"><label>Average <input id="sizeMean" type="range" min="0.02" max="0.2" step="0.001"></label><span id="sizeMeanVal"></span></div>
+      <div class="row"><label>Spread <input id="sizeSpread" type="range" min="0" max="1" step="0.01"></label><span id="sizeSpreadVal"></span></div>
+      <div class="row"><button id="sizeReroll">Re-roll the spread</button><button id="sizeReset">Reset</button></div>
+    </div>
+
+    <div data-group="motion">
+      <div class="row"><label>Body wave <input id="gainWave" type="range" min="0" max="3" step="0.01"></label><span id="gainWaveVal"></span></div>
+      <div class="row"><label>Turn curve <input id="gainCurve" type="range" min="0" max="3" step="0.01"></label><span id="gainCurveVal"></span></div>
+      <div class="row"><label>Bank <input id="gainBank" type="range" min="0" max="3" step="0.01"></label><span id="gainBankVal"></span></div>
+      <div class="row"><label>Turn speed <input id="gainTurn" type="range" min="0.1" max="3" step="0.01"></label><span id="gainTurnVal"></span></div>
+      <div class="row"><button id="gainReset">Reset</button></div>
+    </div>
+
+    <div data-group="speed">
+      <div id="speeds"></div>
+      <div class="row"><button id="speedReset">Reset every speed</button></div>
+    </div>
+
+    <div data-group="models">
+      <div id="models"></div>
+    </div>
+
+    <div data-group="rocks">
+      <div class="row"><label>Caves <input id="caveCount" type="range" min="0" max="4" step="1"></label><span id="caveCountVal"></span></div>
+      <div class="row"><label>Cave size <input id="caveMin" type="range" min="0.012" max="0.12" step="0.001"></label><input id="caveMax" type="range" min="0.012" max="0.12" step="0.001"><span id="caveSizeVal"></span></div>
+      <div class="row"><label>Rocks <input id="rockCount" type="range" min="0" max="8" step="1"></label><span id="rockCountVal"></span></div>
+      <div class="row"><label>Rock size <input id="rockMin" type="range" min="0.012" max="0.12" step="0.001"></label><input id="rockMax" type="range" min="0.012" max="0.12" step="0.001"><span id="rockSizeVal"></span></div>
+      <div class="row"><label>Wood <input id="woodCount" type="range" min="0" max="4" step="1"></label><span id="woodCountVal"></span></div>
+      <div class="row"><label>Wood size <input id="woodMin" type="range" min="0.012" max="0.12" step="0.001"></label><input id="woodMax" type="range" min="0.012" max="0.12" step="0.001"><span id="woodSizeVal"></span></div>
+      <div class="row"><button id="scapeReroll">Reroll scape</button><button id="scapeReset">Reset</button></div>
+    </div>
+
+    <div data-group="plants">
+      <div class="row"><label>Count <input id="plantCount" type="range" min="0" max="60" step="1"></label><span id="plantCountVal"></span></div>
+      <div class="row"><label>Size <input id="plantScale" type="range" min="0.4" max="1.8" step="0.01"></label><span id="plantScaleVal"></span></div>
+      <div class="row"><label>Cabomba clumping <input id="plantClump" type="range" min="0" max="1" step="0.05"></label><span id="plantClumpVal"></span></div>
+      <div class="row"><label>Duckweed <input id="duckweedCount" type="range" min="0" max="400" step="10"></label><span id="duckweedCountVal"></span></div>
+      <div class="row"><label>Hair algae <input id="algaeAmount" type="range" min="0" max="1" step="0.05"></label><span id="algaeAmountVal"></span></div>
+      <div class="row"><label>Bubbles <input id="bubbleCount" type="range" min="0" max="60" step="1"></label><span id="bubbleCountVal"></span></div>
+      <div class="row"><label>Hair grass <input id="grassCount" type="range" min="0" max="30000" step="250"></label><span id="grassCountVal"></span></div>
+      <div class="row"><label>Grass lean <input id="grassLean" type="range" min="0" max="0.15" step="0.005"></label><span id="grassLeanVal"></span></div>
+      <div class="row"><button id="plantReroll">Reroll planting</button><button id="plantReset">Reset</button></div>
+    </div>
+
+    <div data-group="collision">
+      <div class="row"><label><input type="checkbox" id="colPlants"> Plants clear the glass and solids</label></div>
+      <div class="row"><label><input type="checkbox" id="colLeafClamp"> Swaying leaves stay inside the glass</label></div>
+      <div class="row"><label><input type="checkbox" id="colGrass"> Grass clears the glass and solids</label></div>
+      <div class="legend">Each rebuilds the scape. The first and third change where plants and blades are placed; the second builds the plant shader with or without its per-vertex glass clamp. Build times are logged to the console.</div>
+    </div>
+
+    <div data-group="microfauna">
+      <div class="row"><select id="mfSpecies" style="flex:1"></select><button id="mfAdd">Add</button><button id="mfRemove">Remove</button></div>
+      <div class="row"><label>Name <input id="mfName" type="text" maxlength="40" style="width:130px"></label></div>
+      <div class="row"><label>Model <select id="mfModel"></select></label></div>
+      <div class="row"><label>Size <input id="mfSize" type="range" min="0" max="1" step="0.001"></label><span id="mfSizeVal"></span></div>
+      <div class="row"><label>Speed <input id="mfSpeed" type="range" min="0" max="3" step="0.05"></label><span id="mfSpeedVal"></span></div>
+      <div class="row"><label>Per cloud <input id="mfCount" type="range" min="0" max="2000" step="1"></label><span id="mfCountVal"></span></div>
+      <div class="row"><label>Likelihood <input id="mfChance" type="range" min="0" max="1" step="0.05"></label><span id="mfChanceVal"></span></div>
+      <div class="row"><label>Spread <input id="mfSpread" type="range" min="0.05" max="1" step="0.01"></label><span id="mfSpreadVal"></span></div>
+      <div class="row"><label>Depth <input id="mfDepth" type="range" min="0.002" max="0.1" step="0.001"></label><span id="mfDepthVal"></span></div>
+      <div class="row"><label>Draw distance <input id="mfDraw" type="range" min="0.05" max="5" step="0.05"></label><span id="mfDrawVal"></span></div>
+      <div class="legend">Likelihood is the chance that each duckweed patch holds a cloud of this species. Spread is how much of the patch a cloud covers. Depth is how far below the surface it reaches; it is densest against the fronds. Draw distance is how far from the camera the species is still drawn.</div>
+      <div class="row"><button id="mfReset">Reset</button></div>
+    </div>
+
+    <div data-group="current">
+      <div class="row"><label>Direction <input id="curHeading" type="range" min="-180" max="180" step="1"></label><span id="curHeadingVal"></span></div>
+      <div class="row"><label>Strength <input id="curAmplitude" type="range" min="0" max="0.2" step="0.001"></label><span id="curAmplitudeVal"></span></div>
+      <div class="row"><label>Rate <input id="curFrequency" type="range" min="0" max="2" step="0.01"></label><span id="curFrequencyVal"></span></div>
+      <div class="row"><label>Rebound <input id="curBend" type="range" min="0" max="1" step="0.01"></label><span id="curBendVal"></span></div>
+      <div class="row"><label>Onset <input id="curSkew" type="range" min="0" max="1" step="0.01"></label><span id="curSkewVal"></span></div>
+      <div class="row"><label>Stiffness <input id="curStiffness" type="range" min="0.1" max="6" step="0.05"></label><span id="curStiffnessVal"></span></div>
+      <div class="row"><label>Travel <input id="curSpatial" type="range" min="0" max="30" step="0.1"></label><span id="curSpatialVal"></span></div>
+      <div class="row"><label>Tip lag <input id="curPhaseLag" type="range" min="0" max="12" step="0.1"></label><span id="curPhaseLagVal"></span></div>
+      <div class="row"><label>Sync <input id="curSync" type="range" min="0" max="1" step="0.01"></label><span id="curSyncVal"></span></div>
+      <div id="curSpecies"></div>
+      <div class="row"><button id="curReset">Reset</button></div>
+    </div>
+
+    <div data-group="stats"><div id="stats"></div></div>
+
+    <div data-group="inspector">
+      <div id="inspector"></div>
+    </div>
+
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import * as TSLN from 'three/tsl';   // maths nodes for the bubble shader, namespaced so they cannot clash with the page's own names
+import { WebGPURenderer, MeshStandardNodeMaterial, MeshBasicNodeMaterial, MeshLambertNodeMaterial } from 'three/webgpu';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+// SkeletonUtils.clone, not Object3D.clone(true): a plain clone SHARES the skeleton, so every
+// Goldeen in the tank would be posed by whichever one the mixer ran last. It still shares geometry
+// and materials, so a second individual of a species costs bone objects and nothing else.
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import {
+  TANK_DEFAULTS, createWorld, stepWorld, addFlakes, legalIntents, addFish, removeFish, FLAKE,
+  needsDecision, prepareDecision, applyIntent, baselineIntent, setRestPointSampler, fishDraft,
+} from './aquarium-world.js';
+import { createDeterministicPolicy } from './aquarium-policy.js';
+import { poseFor } from './pokemon-straighten.js';
+import { SERPENT, spineLayout, spineAngles, boneQuaternion } from './aquarium-serpent.js';
+import { surfaceMovePose, surfaceSeed } from './aquarium-surface.js';
+import { resolveAquariumNeuralConfig } from './aquarium-neural-config.js';
+import { createAquariumNeuralController } from './aquarium-neural-controller.js';
+import { createAquariumTelemetry } from './aquarium-telemetry.js';
+import { createAquariumNeuralObserver } from './aquarium-neural-observer.js';
+import { mountAquariumNeuralUI } from './aquarium-neural-ui.js';
+import { mountAquariumCompareUI } from './aquarium-compare-ui.js';
+import { createAquariumExperimentRunner, stockWithFishSpecies } from './aquarium-experiments.js';
+import { mountAquariumExperimentUI } from './aquarium-experiment-ui.js';
+import { createAquariumTabs } from './aquarium-ui-tabs.js';
+import { stepLocomotion, SWIM, strokeRate, randomSwimPoint } from './aquarium-locomotion.js';
+import {
+  createScape, plantTankScale, plantTankRadius, buildSubstrateArrays, SAND_TILE,
+  resolveHardscape, resolvePlants, HARDSCAPE_DEFAULTS, PLANT_DEFAULTS, GRASS_LEAN, resolveGrassLean,
+} from './aquarium-scape.js';
+import { buildDuckweedArrays, buildAlgaeArrays, ALGAE, DUCKWEED } from './aquarium-growth.js';
+import { BUBBLES, placeBubbleSpots, buildBubbleArrays, bubbleAt } from './aquarium-bubbles.js';
+import {
+  createMicrofauna, resolveMicrofauna, newSpecies, MICROFAUNA, MICROFAUNA_CONTROLS, MICROFAUNA_MODELS, MICROFAUNA_MODEL_KEYS,
+} from './aquarium-microfauna.js';
+import {
+  CURRENT_DEFAULTS, resolveCurrent, resolveCurrentSpecies, currentHeading,
+} from './aquarium-current.js';
+import {
+  LAMP_DEFAULTS, resolveLamp, lampPosition, lampCone, lampSubmerged, lampMakesCaustics, shadowsDue,
+} from './aquarium-lamp.js';
+import { findPerchSurface } from './aquarium-perch.js';
+import {
+  ROCK_SHAPE, WOOD_SHAPE, CAVE_SHAPE, plantCloud, plantSwayTip, settlePlants, grassAccept,
+} from './aquarium-obstacles.js';
+import {
+  applyWaterOptics, WATER_DEFAULTS, WATER_START, causticNode, CAUSTIC_DEFAULTS, setAquariumWaveLook,
+} from './aquarium-water.js';
+import { makeWaterProfile, makeWaveFns } from './water-hybrid.js';
+import { sampleWaves } from './water-waves.js';
+import { presetOpts, buildCreatureGeometry, FAUNA_PRESETS, deserializeSpecies } from './fauna.js';
+import { BODY_WAVE_LAG_CYCLES } from './fauna-motion.js';
+import {
+  PROCEDURAL_SPECIES, MODEL_SPECIES, MODEL_KEYS, modelPath, isModelSpecies, speciesLabel,
+  speciesTuning, speciesForIndex, modelSpeciesIn, modelScale, migrateStock, STOCK_VERSION,
+  sizeFor, resolveSizing, SIZE_LIMITS, tankMaxSpan, motionStyle, temperamentFor, resolveMotionGain,
+  habitRecord, SPEED_LIMITS, speciesIn, initialSpin, newFishRecord, nextFishName,
+  registerFaunaSpecies, faunaEntry, faunaKeys, rosterOptions,
+} from './aquarium-species.js';
+// The panel's collapsible-section idiom, shared with bot-viewer-v3.html and environment-viewer.html.
+// Only the four behaviour functions: `installPanelTheme` ships a light palette and this panel is
+// dark, so the CSS for `.sec` is the tank's own against the same class contract.
+import {
+  createSection, setAllSectionsCollapsed, readSectionStates, applySectionStates,
+} from './workshop-panel-theme.js';
+// The lab's measuring module, used for exactly what it is for. These GLBs author vertices 10x in
+// bone-local space, so every bounding volume THREE computes for one is garbage -- the only honest
+// size for a Stadium model is the one read out of the file's own skinned vertices.
+import { readRigFromGLB } from './pokemon-rig.js';
+import { PLANT_PRESETS, buildPlantGeometry, plantTint } from './plants.js';
+import { createGrass } from './grass.js';
+import { FALLBACK_COLORS } from './terrain-textures.js';
+import { createLightingRig } from './lights.js';
+import { createDiskStore, describeStatus } from './disk-store.js';
+import {
+  resolveRippleSettings, enqueueRipple, fishRippleSource, flakeRippleSource, bubbleRippleSource,
+  createAmbientRippleState, pollAmbientRipple, RIPPLE_VISUAL,
+} from './aquarium-ripple-logic.js';
+import { createRippleSystem } from './aquarium-ripples.js';
+import {
+  Fn, attribute, uniform, float, vec2, vec3, vec4, sin, cos, pow, dot, clamp, oneMinus, mix,
+  normalize, cross, positionLocal, normalLocal, positionWorld, cameraPosition, texture, uv, shadow,
+  smoothstep,
+} from 'three/tsl';
+
+// Where a fish goes to do nothing. The world asks for a point; the steering layer knows the shape
+// of the water, including each animal's depth preference. Injected rather than imported so the
+// world keeps no dependency on locomotion -- see setRestPointSampler.
+setRestPointSampler(randomSwimPoint);
+
+const PANEL = 320;
+const TANK = TANK_DEFAULTS;
+// The widest anything gets drawn. Both the size slider and a species' display multiplier run wider
+// than the tank, deliberately -- the cap is here so neither has to be narrowed.
+const MAX_SPAN = tankMaxSpan(TANK);
+const BOX_MIN = vec3(...TANK.min);
+const BOX_MAX = vec3(...TANK.max);
+
+// ---------------------------------------------------------------- renderer
+
+// ?prof=1 shows CPU ms per stage, draw calls and GPU render ms. GPU timestamps change frame pacing, so compare only within one mode.
+const PROF = new URLSearchParams(location.search).has('prof');
+// Developer rollout only. Off unless both ?neural=1 and ?neuralFish=<id> are explicit.
+const NEURAL_CONFIG = resolveAquariumNeuralConfig(location.search);
+// Read-only observability is independent of whether neural control is enabled. Telemetry samples
+// every virtual fish; the neural observer subscribes to activity only while the Neural tab is open.
+const telemetry = createAquariumTelemetry({ sampleHz: 1, neuralSampleHz: 5, maxLiveMinutes: 120 });
+const neuralObserver = createAquariumNeuralObserver();
+const experimentRunner = createAquariumExperimentRunner();
+const renderer = new WebGPURenderer({ antialias: true, trackTimestamp: PROF });
+renderer.setSize(innerWidth - PANEL, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x0e1114);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+await renderer.init();
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, (innerWidth - PANEL) / innerHeight, 0.02, 20);
+camera.position.set(0.55, 0.42, 1.25);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.22, 0);
+
+// ---------------------------------------------------------------- lighting
+//
+// The shared rig from lights.js, the same one bot-viewer-v3 uses, rather than three loose lights.
+// An aquarium is lit by a hood lamp just above and slightly in front of the glass, so the default
+// sits high and a little off-axis: high enough that fish cast shadows onto the sand beneath them,
+// off-axis enough that the hardscape has a lit side and a dark side.
+// The sun as the caustic reads it. Declared HERE, with the light, rather than beside the other
+// caustic uniforms: fitKeyLight() writes them and runs at module top level, so a declaration further
+// down the file is in its temporal dead zone and the page dies on load with
+// "Cannot access 'uSunDir' before initialization". A uniform belongs next to whatever writes it.
+const uSunDir = uniform(new THREE.Vector3(0, 1, 0));
+const uSunColor = uniform(new THREE.Vector3(1, 1, 1));
+// How much light a bubble reflects: the room (ambient) and the two lights. Set where the lights are set.
+const uBubbleAmb = uniform(0.3, 'float');
+const uBubbleSun = uniform(0.4, 'float');
+const uBubbleLamp = uniform(0, 'float');
+
+const rig = createLightingRig({
+  scene, ui: false,
+  // Tuned by eye. A low sun raking across the tank reads better than one overhead: it gives the
+  // hardscape a lit side and a long shadow, where a high sun flattens everything it lights.
+  elevation: 24, azimuth: 54,
+  sunColor: '#fff6e8', sunIntensity: 4.6,
+  ambientColor: '#7fa8c4', ambientIntensity: 0.32,
+});
+rig.dirLight.castShadow = true;
+// Use the same shadow node for direct sunlight and the emissive caustic term.
+const sunShadow = shadow(rig.dirLight);
+rig.dirLight.shadow.shadowNode = sunShadow;
+scene.add(rig.dirLight.target);
+rig.dirLight.shadow.mapSize.set(2048, 2048);
+// The shadow pass redraws every caster, so it is roughly half the draw calls; refresh it every Nth frame. ?shadowEvery=1 restores every frame.
+const SHADOW_EVERY = Math.max(1, Math.round(Number(new URLSearchParams(location.search).get('shadowEvery'))) || 2);
+rig.dirLight.shadow.autoUpdate = false;
+let shadowFrame = 0;
+
+/**
+ * Point the key at the tank and fit its shadow frustum to it.
+ *
+ * The rig parks its light 50 m out, which is right for a landscape and wrong for a 1.2 m box: an
+ * orthographic shadow camera sized for that distance spends its whole 2048 map on empty air and
+ * the tank gets a handful of texels. Fitted to the tank instead, a texel is well under a
+ * millimetre, which is what makes a fish's shadow read as a fish rather than as a blob.
+ *
+ * Called again after every rig change, because lights.js re-parks the light on each setter.
+ */
+const TANK_CENTER = new THREE.Vector3(
+  (TANK.min[0] + TANK.max[0]) / 2,
+  (TANK.min[1] + TANK.max[1]) / 2,
+  (TANK.min[2] + TANK.max[2]) / 2,
+);
+const TANK_RADIUS = 0.5 * Math.hypot(
+  TANK.max[0] - TANK.min[0], TANK.max[1] - TANK.min[1], TANK.max[2] - TANK.min[2],
+);
+function fitKeyLight() {
+  const dir = rig.dirLight.position.clone().normalize();
+  const dist = TANK_RADIUS * 3;
+  rig.dirLight.position.copy(TANK_CENTER).addScaledVector(dir, dist);
+  rig.dirLight.target.position.copy(TANK_CENTER);
+  rig.dirLight.target.updateMatrixWorld();
+
+  const cam = rig.dirLight.shadow.camera;
+  cam.left = -TANK_RADIUS; cam.right = TANK_RADIUS;
+  cam.top = TANK_RADIUS; cam.bottom = -TANK_RADIUS;
+  cam.near = 0.01;
+  cam.far = dist + TANK_RADIUS * 2;
+  cam.updateProjectionMatrix();
+  // Bias in METRES, and the tank is centimetres: a landscape's 0.01 would float every shadow clear
+  // of its caster. normalBias does the work, since the substrate is a smooth curved surface where
+  // slope-scaled acne is the failure mode.
+  rig.dirLight.shadow.normalBias = 0.0015;
+  rig.dirLight.shadow.bias = -0.00005;
+
+  // The caustic refracts the SUN, so it needs the same direction and colour the key is using.
+  uSunDir.value.copy(dir);
+  uSunColor.value.set(rig.dirLight.color.r, rig.dirLight.color.g, rig.dirLight.color.b);
+  uBubbleSun.value = rig.dirLight.intensity * 0.1;
+  uBubbleAmb.value = rig.ambLight.intensity;
+}
+fitKeyLight();
+
+// ---------------------------------------------------------------- the lamp
+//
+// A spot aimed straight down, like a hood over the tank -- or, with a negative height, a lamp sunk
+// into the water. aquarium-lamp.js holds the geometry and the rules; this is the three.js half.
+// Off is intensity 0 and castShadow false rather than `visible = false`. castShadow false is NOT
+// free: three disposes this light's ShadowNode and nulls its shadowMap, while the caustic graph
+// still holds that node -- so a shadow refresh requested for a non-casting light crashes the frame
+// on `shadowMap.depthTexture`. shadowsDue() never requests one, and switching a shadow off clears
+// any request already pending. See aquarium-lamp.js.
+const LAMP = resolveLamp(null);
+const lamp = new THREE.SpotLight(0xffffff, 0, 0, 1, 0.5, 2);
+lamp.castShadow = true;
+lamp.shadow.mapSize.set(1024, 1024);
+lamp.shadow.camera.near = 0.01;
+lamp.shadow.camera.far = 1.6;   // SpotLightShadow only overrides far when the light has a distance
+lamp.shadow.normalBias = 0.002;
+lamp.shadow.bias = -0.0001;
+lamp.shadow.autoUpdate = false;
+const lampShadow = shadow(lamp);
+lamp.shadow.shadowNode = lampShadow;
+scene.add(lamp, lamp.target);
+
+// A puck rather than a full-length hood, because the beam is round and the lamp can go under the
+// water, where a hood would read as a shelf. Casts nothing: the light sits inside it.
+const lampFixture = new THREE.Group();
+{
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.045, 0.05, 0.022, 32),
+    new MeshStandardNodeMaterial({ color: 0x23272d, roughness: 0.55, metalness: 0.3 }),
+  );
+  body.position.y = 0.011;
+  const glowMat = new MeshBasicNodeMaterial({ color: 0xffffff });
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(0.04, 32), glowMat);
+  glow.rotation.x = Math.PI / 2;   // facing down, the way the light goes
+  glow.position.y = -0.0005;
+  lampFixture.add(body, glow);
+  lampFixture.userData.glow = glowMat;
+}
+scene.add(lampFixture);
+
+// What the caustic graph reads. The graph was built around ONE parallel light; a lamp is a point,
+// so its direction is per-fragment, and it is blended in by `uCausticFromLamp` rather than given a
+// second caustic graph -- one pattern, from whichever light the surface is bending.
+const uLampPos = uniform(new THREE.Vector3());
+const uLampColor = uniform(new THREE.Vector3(1, 1, 1));
+const uLampCone = uniform(new THREE.Vector2(0.6, 0.9));   // cos outer, cos inner
+const uLampRef2 = uniform(1, 'float');                    // squared distance to the floor centre
+const uLampShadowOn = uniform(1, 'float');
+const uSunShadowOn = uniform(1, 'float');
+const uCausticFromLamp = uniform(0, 'float');
+
+const lampToFragment = uLampPos.sub(positionWorld);
+const toLamp = normalize(lampToFragment);
+const causticDir = normalize(mix(uSunDir, toLamp, uCausticFromLamp));
+// A point light's pool: bright under the lamp, fading toward the corners, and nothing outside the
+// beam. The SpotLight does this for its own lighting; the caustic is emissive and has to do it too.
+const lampBeam = smoothstep(uLampCone.x, uLampCone.y, toLamp.y)
+  .mul(clamp(uLampRef2.div(dot(lampToFragment, lampToFragment).max(1e-4)), 0, 3));
+const causticColor = mix(uSunColor, uLampColor.mul(lampBeam), uCausticFromLamp);
+// Each light's shadow gated by its OWN switch, so sun shadows off does not also strip the lamp's
+// pattern of its shadows.
+const causticShadow = mix(
+  mix(float(1), sunShadow, uSunShadowOn),
+  mix(float(1), lampShadow, uLampShadowOn),
+  uCausticFromLamp,
+);
+
+/** Push LAMP into the light, the fixture and the caustic inputs. Nothing rebuilds. */
+function applyLamp() {
+  const [x, y, z] = lampPosition(LAMP, TANK, WATER_LEVEL);
+  lamp.position.set(x, y, z);
+  lamp.target.position.set(x, TANK.min[1], z);
+  lamp.target.updateMatrixWorld();
+  lamp.color.set(LAMP.color);
+  lamp.intensity = LAMP.enabled ? LAMP.intensity : 0;
+  uBubbleLamp.value = LAMP.enabled ? LAMP.intensity * 0.15 : 0;
+  lamp.angle = LAMP.angleDeg * Math.PI / 180;
+  lamp.penumbra = LAMP.penumbra;
+  lamp.castShadow = LAMP.enabled && LAMP.castShadow;
+  // Moving the lamp moves its shadow; switching it off must also cancel a refresh already asked for.
+  lamp.shadow.needsUpdate = lamp.castShadow;
+
+  const { cosOuter, cosInner } = lampCone(LAMP);
+  uLampPos.value.set(x, y, z);
+  uLampCone.value.set(cosOuter, cosInner);
+  const drop = y - TANK.min[1];
+  uLampRef2.value = drop * drop;
+  // Relative to the default brightness, so at the default the lamp's pattern matches the sun's
+  // convention (colour, not intensity) and dimming the lamp dims its caustics with it.
+  const k = LAMP.intensity / LAMP_DEFAULTS.intensity;
+  uLampColor.value.set(lamp.color.r * k, lamp.color.g * k, lamp.color.b * k);
+  uLampShadowOn.value = lamp.castShadow ? 1 : 0;
+  // Falls back to the sun when the lamp cannot bend through the surface -- submerged, off, or dark.
+  uCausticFromLamp.value = lampMakesCaustics(LAMP) ? 1 : 0;
+
+  lampFixture.visible = LAMP.showFixture;
+  lampFixture.position.set(x, y, z);
+  const glow = lampFixture.userData.glow;
+  glow.color.copy(lamp.color).multiplyScalar(LAMP.enabled ? Math.min(1, 0.35 + LAMP.intensity / 8) : 0.08);
+}
+// NOT called here: it reads WATER_LEVEL, declared further down, and a call at this point died on
+// load in its temporal dead zone. The saved-state load applies it, before the tank is built.
+
+/**
+ * Size the canvas to whatever the panel is not using.
+ *
+ * Measured rather than assumed, because the panel can be minimised: a fixed `innerWidth - PANEL`
+ * would leave a band of page background where the panel used to be.
+ */
+function resizeRenderer() {
+  const panel = document.getElementById('panel');
+  const width = Math.max(1, innerWidth - (panel ? panel.offsetWidth : PANEL));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(width, innerHeight);
+  camera.aspect = width / innerHeight;
+  camera.updateProjectionMatrix();
+}
+
+addEventListener('resize', resizeRenderer);
+
+// ---------------------------------------------------------------- materials
+
+// Water is tuned by eye, so its four numbers are uniforms rather than constants: the sliders move
+// the live graph instead of rebuilding every material in the tank.
+const uFogDensity = uniform(WATER_START.fogDensity, 'float');
+const uFogMax = uniform(WATER_START.fogMax, 'float');
+const uClarity = uniform(WATER_START.clarity, 'float');
+const uDepthScale = uniform(WATER_START.depthScale, 'float');
+const uFogColor = uniform(new THREE.Vector3(...WATER_START.fogColor));
+const uAbsorb = uniform(new THREE.Vector3(...WATER_START.absorb));
+const uShallow = uniform(new THREE.Vector3(...WATER_START.shallow));
+const uDeep = uniform(new THREE.Vector3(...WATER_START.deep));
+const WATER_PARAMS = {
+  fogDensity: uFogDensity, fogMax: uFogMax, fogColor: uFogColor,
+  clarity: uClarity, depthScale: uDepthScale, absorb: uAbsorb, shallow: uShallow, deep: uDeep,
+};
+
+// The glass and the surface are how transparent the tank LOOKS, independently of how the water
+// absorbs. A clean tank is nearly invisible: you read it from the waterline, the surface, and a
+// faint tint on whatever is furthest away -- not from a coloured box.
+// Tuned by eye, and both very low: a clean tank is glass you look through without noticing and a
+// surface you read from its waterline rather than its body.
+const GLASS_DEFAULTS = Object.freeze({ opacity: 0.01, surfaceOpacity: 0.01 });
+const uGlassOpacity = uniform(GLASS_DEFAULTS.opacity, 'float');
+const uSurfaceOpacity = uniform(GLASS_DEFAULTS.surfaceOpacity, 'float');
+
+/** Every tank-content material goes through this, so the water model has exactly one home. */
+function tankColor(colorNode) {
+  return applyWaterOptics(colorNode, BOX_MIN, BOX_MAX, WATER_PARAMS);
+}
+
+/**
+ * The water's own surface, from the tank definition -- the SAME number the simulation stops fish
+ * at, via `surfaceCeiling`. It used to be computed here alone, and the fish never found it.
+ */
+const WATER_LEVEL = TANK.waterLevel;
+// Bubble centres reach the water plane, dwell there, then pop.
+const BUBBLE_TOP = WATER_LEVEL;
+const RIPPLE_SETTINGS = resolveRippleSettings(null);
+const rippleQueue = [];
+let rippleAmbient = createAmbientRippleState(1, 0);
+const rippleSystem = createRippleSystem({ renderer, tank: TANK, settings: RIPPLE_SETTINGS });
+const queueRipple = (source) => { if (RIPPLE_SETTINGS.enabled) enqueueRipple(rippleQueue, source); };
+// Per-feature toggles for perf testing; each closes an If in the shader rather than zeroing a result.
+const uRippleGlint = uniform(1, 'float');
+const uRippleCaustics = uniform(1, 'float');
+const uBubbleRide = uniform(1, 'float');
+// The daphnia/copepod/algae cloud in the duckweed's phyllosphere: the fauna.js/fauna-flock.js/
+// fauna-gpu.js stateless-member system, seated on habitats clustered from scape.floaters rather
+// than sampled from terrain. See aquarium-microfauna.js.
+const microfauna = createMicrofauna({ renderer, scene, camera });
+let microfaunaSettings = resolveMicrofauna(null);
+let mfSelected = 0;   // the species id the Micro fauna panel is editing
+
+// Surface shading and caustics read the SAME height field, but caustics deliberately exaggerate
+// only the ripple slope. In a 30 cm water column the physically refracted lateral throw is only a
+// few millimetres, so the old area-ratio caustic barely changed even when the ripple field was live.
+// `waveNormalAt` and `causticWaveNormalAt` are filled in by buildWaterSurface before content builds.
+let waveNormalAt = null;
+let causticWaveNormalAt = null;
+let waveDispAt = null;
+const uCausticStrength = uniform(CAUSTIC_DEFAULTS.strength, 'float');
+const uCausticsEnabled = uniform(1, 'float');
+const uCausticSpread = uniform(CAUSTIC_DEFAULTS.spread, 'float');
+const causticMotion = { value: CAUSTIC_DEFAULTS.motion };
+const causticWidth = { value: CAUSTIC_DEFAULTS.width };
+const CAUSTIC_PARAMS = {
+  strength: uCausticStrength, spread: uCausticSpread, enabled: uCausticsEnabled,
+  tint: vec3(...CAUSTIC_DEFAULTS.tint),
+  shadowEnabled: 1,   // gated per light in causticShadow
+};
+
+/**
+ * The caustic term for one tank material, or null before the surface exists.
+ *
+ * Emissive rather than multiplied into the albedo: a caustic is light ARRIVING at the surface, so
+ * it adds. Multiplying would let it darken the substrate where the surface happens to defocus,
+ * which is not a thing light does.
+ */
+let causticGraph = null;
+function causticEmissive() {
+  if (!causticWaveNormalAt) return null;
+  // Built once and shared by every material that takes it. The graph has no per-material input --
+  // it reads positionWorld and uniforms only -- so a fresh copy per plant would be twenty identical
+  // graphs, and the sliders would have twenty places to reach instead of one.
+  if (!causticGraph) {
+    causticGraph = causticNode({
+      waterLevel: WATER_LEVEL, sunDir: causticDir, sunColor: causticColor,
+      waveNormalAt: causticWaveNormalAt,
+      params: CAUSTIC_PARAMS, shadowVisibility: causticShadow,
+    });
+  }
+  return causticGraph;
+}
+
+/**
+ * currentOffset (aquarium-current.js) as TSL. The CPU version is the reference and is unit-tested;
+ * this is its GPU twin, in the tradition of forest-cull.js/forest-gpu.js. Keep them in sync by hand.
+ *
+ * `h` is normalized height up the plant, `x` the plant's world X so neighbours are out of phase.
+ */
+// Live, because every one of these is a uniform write and the whole point is to tune the motion
+// while watching it. Declared above the graph that reads them -- see the TDZ guard in
+// test-page-syntax.mjs, which exists because a uniform once moved below its first use.
+const CURRENT_PARAMS = { ...CURRENT_DEFAULTS };
+const uCurFreq = uniform(CURRENT_DEFAULTS.frequency, 'float');
+const uCurAmp = uniform(CURRENT_DEFAULTS.amplitude, 'float');
+const uCurLag = uniform(CURRENT_DEFAULTS.phaseLag, 'float');
+const uCurSpatial = uniform(CURRENT_DEFAULTS.spatial, 'float');
+const uCurBend = uniform(CURRENT_DEFAULTS.bend, 'float');
+const uCurSkew = uniform(CURRENT_DEFAULTS.skew, 'float');
+const uCurStiff = uniform(CURRENT_DEFAULTS.stiffness, 'float');
+const uCurHeading = uniform(new THREE.Vector2(...currentHeading(CURRENT_DEFAULTS)));
+// Seconds of phase a plant's own roll may buy it. At sync 1 this is zero and the tank moves as one
+// body of water, which is what a current is; the roll itself stays a per-plant attribute so the
+// slider can loosen it without rebuilding anything.
+const uCurSyncSpan = uniform((1 - CURRENT_DEFAULTS.sync) / CURRENT_DEFAULTS.frequency, 'float');
+
+/** Per-species response. One set of uniforms per species, however many plants carry it. */
+const currentLook = {};
+const currentUniforms = new Map();
+function currentUniformsFor(species) {
+  let u = currentUniforms.get(species);
+  if (!u) {
+    const r = resolveCurrentSpecies(species, currentLook[species]);
+    u = { sway: uniform(r.sway, 'float'), rate: uniform(r.rate, 'float'), stiffness: uniform(r.stiffness, 'float') };
+    currentUniforms.set(species, u);
+  }
+  return u;
+}
+
+/** Push CURRENT_PARAMS into the uniforms. Every one is a plain write -- nothing rebuilds. */
+function applyCurrentUniforms() {
+  uCurFreq.value = CURRENT_PARAMS.frequency;
+  uCurAmp.value = CURRENT_PARAMS.amplitude;
+  uCurLag.value = CURRENT_PARAMS.phaseLag;
+  uCurSpatial.value = CURRENT_PARAMS.spatial;
+  uCurBend.value = CURRENT_PARAMS.bend;
+  uCurSkew.value = CURRENT_PARAMS.skew;
+  uCurStiff.value = CURRENT_PARAMS.stiffness;
+  uCurHeading.value.set(...currentHeading(CURRENT_PARAMS));
+  // Seconds, so it has to track the rate as well as the sync dial: at a slower current a tenth of
+  // a period is more wall-clock time, and a plant that lagged by a tenth must keep lagging by a
+  // tenth rather than by the seconds it happened to be worth before.
+  uCurSyncSpan.value = (1 - CURRENT_PARAMS.sync) / Math.max(CURRENT_PARAMS.frequency, 1e-6);
+}
+
+const currentOffsetNode = /* @__PURE__ */ Fn(([downstream, h, t, sway, rate, stiffness]) => {
+  const height = h.clamp(0, 1);
+  const phase = t.mul(uCurFreq.mul(rate).mul(Math.PI * 2))
+    .sub(downstream.mul(uCurSpatial))
+    .sub(height.mul(uCurLag));
+  // Phase distortion, not amplitude shaping: the rise runs at 1 + skew and the fall at 1 - skew,
+  // which is drag building quicker than a stem recovers.
+  const wave = sin(phase.add(uCurSkew.mul(sin(phase))));
+  const gust = wave.add(1).mul(0.5);                       // 0..1, so the push is never upstream
+  const push = uCurBend.add(gust.mul(oneMinus(uCurBend))); // rests at bend, peaks at full
+  return uCurAmp.mul(sway).mul(height.pow(uCurStiff.mul(stiffness))).mul(push);
+});
+
+// ---------------------------------------------------------------- the tank
+
+let scape, world, policy, neuralController = null;
+let neuralUI = null, compareUI = null, experimentUI = null, aquariumTabs = null;
+let fishMeshes = [];
+const proceduralGeos = new Map();   // species -> geometry, shared by every fish of that species
+let inspectorRows = [];        // one per fish, built with the tank and only read from after
+const growthDrawn = { algae: 0 };   // strands actually built, so the current panel lists algae only when there is some
+let plantGroup, hardscapeGroup, navGroup, growthGroup, substrate, grass, flakeMesh;
+let waterProfile = null;
+const uClock = uniform(0, 'float');           // seconds, drives plant sway
+let running = true;
+let last = performance.now();
+
+// --- where the stock is kept ------------------------------------------------
+//
+// The durable unit is the individual FISH -- who it is, not how many there are. A species count
+// cannot say which temperament survives when the count is edited, so counts derive from this list
+// and never the reverse. Runtime agent state (hunger, wakefulness, the current intent and its
+// commitment) is deliberately absent: it is regenerated on load, because a tank resuming
+// mid-decision is a worse thing to reason about than one that wakes up hungry.
+//
+// A real file in the repo, autosaved, diffable and backed up by git. localStorage is only the copy
+// a page opened without `python serve.py` can still read; it is never the truth.
+const STOCK_FILE = 'aquarium-stock.json';
+const store = createDiskStore({
+  read: '/' + STOCK_FILE, write: '/api/save-aquarium',
+  storage: localStorage, key: 'pcw:aquariumStock', debounceMs: 700,
+});
+await store.load();
+
+// The authored species before ANYTHING reads the roster: the stock deal, the migration and
+// all three species dropdowns run below this line and each one asks what species exist.
+await loadFaunaSpecies();
+
+const saveEl = document.getElementById('save');
+store.onStatus(st => { saveEl.textContent = describeStatus(st, { file: STOCK_FILE }); });
+addEventListener('beforeunload', () => { if (store.dirty) store.flush(); });
+
+/**
+ * How each model species is turned to face and how big it is drawn, per species rather than per
+ * fish: which way a Goldeen's nose points is a fact about the model, so two Goldeen cannot
+ * disagree about it.
+ *
+ * It lives in the stock file and not in `aquarium-species.js` because it is judged by eye. The
+ * defaults are an argument (see `defaultOrientation`), not a measurement, and the one thing that
+ * settles an argument about facing is looking at the tank -- so the page puts it on controls and
+ * writes the answer to disk, the same way the water's four numbers are sliders and not constants.
+ */
+let speciesLook = {};
+
+/**
+ * The size law: an average and a spread, over individuals that keep their place in it.
+ *
+ * `size` is a property of each fish and is what the world reads, so these two numbers are an
+ * AUTHORING surface, not the truth -- moving them rewrites every fish's size and saves it. Each
+ * fish's place in the spread comes from a hash of its id, so re-sizing a tank keeps the big one big
+ * and re-rolling is a deliberate act with its own button.
+ */
+let fishSizing = resolveSizing(null);
+
+/** Global multipliers over every species' motion. Motion is judged by eye, so it gets controls. */
+let motionGain = resolveMotionGain(null);
+// The scape's own settings. Durable like the fish are: a tank someone arranged is a tank they
+// expect back. `rollScape` bumps the seed the scape is drawn from WITHOUT touching world.seed,
+// so rerolling the arrangement does not also reshuffle who the fish are.
+let hardscapeSettings = resolveHardscape(null);
+let plantSettings = resolvePlants(null);
+let grassCount = 9000;
+let grassLean = GRASS_LEAN.default;
+// Collision toggles, for measuring what each costs. All on by default.
+const COLLISION_DEFAULTS = Object.freeze({ plants: true, leafClamp: true, grass: true });
+const resolveCollision = (v) => Object.fromEntries(Object.entries(COLLISION_DEFAULTS)
+  .map(([k, d]) => [k, typeof (v && v[k]) === 'boolean' ? v[k] : d]));
+let collision = resolveCollision(null);
+let rollScape = 0;
+
+/** Persist the tank as it now stands: the scape seed, every fish's identity, and the model look. */
+/**
+ * The durable half of every fish: who it is, not what it is doing.
+ *
+ * Shared by the save path and by any rebuild that must keep the same cast -- rearranging the scape
+ * must not re-roll the fish, so the rebuild is handed these records rather than regenerating.
+ */
+function stockRecords() {
+  return world.fish.map(f => ({
+    id: f.id, name: f.name, species: f.species, size: f.size,
+    temperament: { ...f.temperament },
+    // Derived from the species when the record has none, which it will not until `createWorld`
+    // carries the field through. Writing `{}` in that window would persist an empty habit that
+    // reads back as a real one, and the tank would quietly lose every animal's disposition.
+    habit: { ...(f.habit || habitRecord(f.species)) },
+  }));
+}
+
+function saveStock() {
+  store.setJSON({
+    version: STOCK_VERSION,
+    seed: world.seed,
+    fish: stockRecords(),
+    speciesLook,
+    fishSizing: { ...fishSizing },
+    motionGain: { ...motionGain },
+    scape: { hardscape: hardscapeSettings, plants: plantSettings, grassCount, grassLean, collision, roll: rollScape },
+    current: { settings: { ...CURRENT_PARAMS }, look: { ...currentLook } },
+    lamp: { ...LAMP },
+    microfauna: microfaunaSettings,
+    ripples: { ...RIPPLE_SETTINGS },
+    ui: uiState(),
+  });
+}
+
+function stockFor(n, seed) {
+  // Named fish, with temperaments spread across the space the policy actually reads, so the
+  // inspector shows visibly different animals rather than six of the same one. Species alternates
+  // between the procedural body and the Stadium roster (`aquarium-species.js`), so a default tank
+  // is three plain fish and three different Pokemon rather than a lucky draw.
+  let s = (seed * 2654435761) >>> 0;
+  const rng = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({
+      id: 'fish-' + (i + 1),
+      // Through the same law Add uses, so the thirteenth fish of a generated tank is 'Nib 2' rather
+      // than a second animal called Nib.
+      name: nextFishName(out),
+      species: speciesForIndex(i),
+      // Through the same law the size sliders write, so a new tank and a re-sized one agree.
+      size: sizeFor('fish-' + (i + 1), fishSizing),
+      // Its species' disposition, nudged by its own roll. Drawn flat at random, every Goldeen was
+      // as likely to be gregarious as solitary and the roster was six skins over one animal.
+      temperament: temperamentFor(speciesForIndex(i), rng),
+      // How fast it wants to go, where in the column it wants to be, and how much it would rather
+      // be doing nothing. It rides ON the fish rather than being looked up by species inside the
+      // chooser, so a chooser that is handed the fish is handed its habits with it.
+      habit: habitRecord(speciesForIndex(i)),
+    });
+  }
+  return out;
+}
+
+function clearGroup(g) {
+  if (!g) return;
+  g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  scene.remove(g);
+}
+
+async function build(seed, fishCount, savedStock = null) {
+  clearFish();
+  clearBubbles();
+  clearGroup(plantGroup); clearGroup(hardscapeGroup); clearGroup(navGroup); clearGroup(growthGroup);
+  plantGroup = hardscapeGroup = navGroup = growthGroup = null;
+  if (substrate) { scene.remove(substrate); substrate.geometry.dispose(); substrate.material.dispose(); substrate = null; }
+  if (grass) { scene.remove(grass); grass.dispose(); grass = null; }
+  if (flakeMesh) { scene.remove(flakeMesh); flakeMesh.geometry.dispose(); flakeMesh.material.dispose(); flakeMesh.dispose(); flakeMesh = null; }
+
+  // Scape FIRST, then the world over it: the world takes the scape's hardscape and bed function,
+  // so the simulation floor and the drawn substrate are one surface rather than two.
+  scape = createScape({
+    seed: (seed + rollScape * 7919) >>> 0,
+    tank: TANK,
+    hardscape: hardscapeSettings,
+    plants: plantSettings,
+  });
+  // A saved stock is the fish themselves; the count control only matters when generating new ones.
+  const stock = savedStock && savedStock.length ? savedStock : stockFor(fishCount, seed);
+  // Models first, so `buildFish` is synchronous and every fish appears in the same frame. A
+  // species that fails to load is NOT rewritten in the stock -- the fish is still a Goldeen, it is
+  // just drawn as a procedural body this session, and the record stays true so a reload can retry.
+  await loadModels(stock);
+  world = createWorld({ stock, seed, hardscape: scape.hardscape, floorAt: scape.heightAt });
+  rippleQueue.length = 0;
+  rippleSystem.clear();
+  rippleAmbient = createAmbientRippleState(seed, uClock.value);
+  // After the world, because the tuned speed has to land on records the world has already built --
+  // including a migrated stock, whose saved habits came from the file rather than from here.
+  applySpeciesSpeeds();
+  policy = createDeterministicPolicy({ seed: seed * 7 + 1 });
+  // Neural rollout remains developer-gated. The explicitly selected virtual fish may use the
+  // hybrid neural decision path and bounded locomotion overlay; every other virtual fish stays on
+  // the deterministic policy. With the feature flag off, no Worker is created.
+  neuralController?.dispose();
+  neuralController = NEURAL_CONFIG.enabled ? createAquariumNeuralController({
+    fishId: NEURAL_CONFIG.fishId,
+    tickMs: NEURAL_CONFIG.tickMs,
+    staleMs: NEURAL_CONFIG.staleMs,
+    smoothingTauSec: NEURAL_CONFIG.smoothingTauSec,
+    escapeOn: NEURAL_CONFIG.escapeOn,
+    escapeOff: NEURAL_CONFIG.escapeOff,
+    remoteFoodMode: NEURAL_CONFIG.remoteFoodMode,
+    feedOn: NEURAL_CONFIG.feedOn,
+    fallbackPolicy: policy,
+    seed: seed * 97 + 13,
+  }) : null;
+
+  // A rebuild starts a fresh measurement session. The recorder is observational: it only reads
+  // state after the world/controller are created and never draws from world.rng.
+  neuralObserver.attachController(neuralController);
+  telemetry.startSession({
+    aquariumSeed: seed,
+    neuralEnabled: !!neuralController,
+    neuralFishId: neuralController?.fishId || null,
+    neuralModelVersion: neuralController?.modelVersion || null,
+    codeFeature: 'neural-observability-v1',
+  }, world, neuralController);
+
+  buildSubstrate();
+  buildHardscape();
+  buildGrowth();
+  microfauna.rebuild({
+    seed: scape.seed, tank: TANK, floaters: scape.floaters, waterLevel: WATER_LEVEL,
+    settings: microfaunaSettings,
+  });
+  buildBubbles();
+  buildPlants();
+  buildGrass();
+  buildFlakes();
+  buildFish();
+}
+
+// ---- substrate ------------------------------------------------------------
+
+/**
+ * The repo's own sand set, `textures/ground/sand/`, under the same conventions terrain-textures.js
+ * loads it with: repeat wrapping, sRGB on colour only, anisotropy, mipmaps.
+ *
+ * Loaded directly rather than through `applyTerrainTextures`, which wants map data, biome weights
+ * and a splat -- terrain machinery, and a tank is one layer over a box. A missing file resolves to
+ * null and the material falls back to FALLBACK_COLORS.sand rather than rendering black.
+ */
+async function loadSandMaps() {
+  const loader = new THREE.TextureLoader();
+  const one = (file, srgb) => new Promise((resolve) => loader.load(
+    `textures/ground/sand/${file}`,
+    (t) => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 8;
+      t.generateMipmaps = true;
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      resolve(t);
+    },
+    undefined,
+    () => resolve(null),
+  ));
+  const [color, normal, roughness, ao] = await Promise.all([
+    one('color.jpg', true), one('normal.jpg', false), one('roughness.jpg', false), one('ao.jpg', false),
+  ]);
+  return { color, normal, roughness, ao };
+}
+
+function buildSubstrate() {
+  // The geometry is built in aquarium-scape.js as plain arrays so its winding can be tested in
+  // Node; this only wraps them. Every face must wind outward or it is backface-culled and you see
+  // straight through the sand -- the authored normal attribute does not affect culling.
+  const a = buildSubstrateArrays({ tank: TANK, heightAt: scape.heightAt, segX: 128, segZ: 64 });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(a.positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(a.normals, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(a.uvs, 2));
+  geo.setAttribute('uv1', new THREE.Float32BufferAttribute(a.uvs, 2));   // aoMap reads uv1
+  geo.setIndex(a.indices);
+
+  const mat = new MeshStandardNodeMaterial({ roughness: 0.88, metalness: 0 });
+  if (sandMaps.normal) mat.normalMap = sandMaps.normal;
+  if (sandMaps.roughness) mat.roughnessMap = sandMaps.roughness;
+  if (sandMaps.ao) mat.aoMap = sandMaps.ao;
+  // colorNode replaces only the diffuse term, so the normal and roughness maps above still apply.
+  const albedo = sandMaps.color
+    ? texture(sandMaps.color, uv()).rgb
+    : vec3(...new THREE.Color(FALLBACK_COLORS.sand).toArray());
+  mat.colorNode = tankColor(albedo);
+  // The sand is what a caustic is FOR: a flat-ish lit floor under a rippling surface.
+  const caustic = causticEmissive();
+  if (caustic) mat.emissiveNode = caustic;
+  substrate = new THREE.Mesh(geo, mat);
+  substrate.receiveShadow = true;    // the bed is what every shadow in the tank lands on
+  scene.add(substrate);
+}
+
+// ---- hardscape ------------------------------------------------------------
+
+/**
+ * Measure where a perching animal can sit on this solid, off the mesh actually drawn.
+ *
+ * aquarium-perch.js does the choosing; this only supplies its rays -- straight down, against this
+ * one mesh, so a log leaning over a rock cannot hand the rock's perch a point on the log. Once per
+ * build: the solids do not move. A solid with nowhere gentle enough to sit keeps `perchSurface` null
+ * and the world falls back to its radius-based perchPoint, as before.
+ */
+const _perchRay = new THREE.Raycaster();
+const _perchDown = new THREE.Vector3(0, -1, 0);
+const _perchFrom = new THREE.Vector3();
+function measurePerch(h, mesh) {
+  mesh.updateWorldMatrix(true, false);
+  const above = TANK.max[1] + 0.1;
+  const castDown = (x, z) => {
+    _perchFrom.set(x, above, z);
+    _perchRay.set(_perchFrom, _perchDown);
+    const hit = _perchRay.intersectObject(mesh, false)[0];
+    return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  };
+  const surface = findPerchSurface({ x: h.position[0], z: h.position[2], radius: h.radius, castDown });
+  // The same cap perchOn applies: a perch at the waterline is one no animal can settle onto.
+  h.perchSurface = surface && surface.point[1] <= TANK.max[1] - 0.03 ? surface : null;
+}
+
+function buildHardscape() {
+  hardscapeGroup = new THREE.Group();
+  navGroup = new THREE.Group();
+  navGroup.visible = document.getElementById('navdots').checked;
+
+  // world.hardscape, NOT scape.hardscape: createWorld copies the records, so those are two object
+  // graphs holding equal data. Drawing the world's copy makes "the drawn solid and the behaviour
+  // target are the same thing" literally true rather than true by convention.
+  for (const h of world.hardscape) {
+    let mesh;
+    if (h.kind === 'rock') {
+      const g = new THREE.IcosahedronGeometry(h.radius, ROCK_SHAPE.detail);
+      g.scale(...ROCK_SHAPE.scale);
+      const mat = new MeshStandardNodeMaterial({ roughness: 0.9, flatShading: true });
+      mat.colorNode = tankColor(vec3(0.33, 0.32, 0.31));
+      mesh = new THREE.Mesh(g, mat);
+      mesh.position.set(h.position[0], h.position[1] + h.radius * ROCK_SHAPE.lift, h.position[2]);
+    } else if (h.kind === 'wood') {
+      const g = new THREE.CylinderGeometry(
+        h.radius * WOOD_SHAPE.radiusTop, h.radius * WOOD_SHAPE.radiusBottom,
+        h.radius * WOOD_SHAPE.length, WOOD_SHAPE.segments, 1,
+      );
+      g.rotateZ(WOOD_SHAPE.tilt);
+      const mat = new MeshStandardNodeMaterial({ roughness: 1 });
+      mat.colorNode = tankColor(vec3(0.24, 0.16, 0.11));
+      mesh = new THREE.Mesh(g, mat);
+      mesh.position.set(h.position[0], h.position[1] + h.radius * WOOD_SHAPE.lift, h.position[2]);
+      mesh.rotation.y = h.shape.yaw;
+    } else {
+      // A cave is an open tube lying along its facing, so its mouth agrees with its navPoint and a
+      // hiding fish is visibly inside something.
+      const g = new THREE.CylinderGeometry(
+        h.radius * CAVE_SHAPE.radiusTop, h.radius * CAVE_SHAPE.radiusBottom,
+        h.radius * CAVE_SHAPE.length, CAVE_SHAPE.segments, 1, true,
+      );
+      g.rotateX(Math.PI / 2);
+      const mat = new MeshStandardNodeMaterial({ roughness: 1, side: THREE.DoubleSide });
+      mat.colorNode = tankColor(vec3(0.19, 0.20, 0.20));
+      mesh = new THREE.Mesh(g, mat);
+      mesh.position.set(h.position[0], h.position[1] + h.radius * CAVE_SHAPE.lift, h.position[2]);
+      mesh.lookAt(new THREE.Vector3(
+        h.position[0] + h.facing[0],
+        h.position[1] + h.radius * CAVE_SHAPE.lift + h.facing[1],
+        h.position[2] + h.facing[2],
+      ));
+    }
+    const caustic = causticEmissive();
+    if (caustic) mesh.material.emissiveNode = caustic;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    hardscapeGroup.add(mesh);
+    measurePerch(h, mesh);
+
+    if (h.navPoint) {
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.006, 8, 6),
+        new MeshBasicNodeMaterial({ color: 0xffd166 }),
+      );
+      dot.position.set(h.navPoint[0], h.navPoint[1], h.navPoint[2]);
+      navGroup.add(dot);
+    }
+  }
+  scene.add(hardscapeGroup);
+  scene.add(navGroup);
+}
+
+// ---- duckweed and hair algae -----------------------------------------------
+
+/** The drawn hardscape meshes as world-space arrays, so algae grows on what is actually on screen. */
+function hardscapeSurfaces() {
+  hardscapeGroup.updateMatrixWorld(true);
+  const out = [];
+  const v = new THREE.Vector3();
+  hardscapeGroup.traverse((o) => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    const positions = [];
+    for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); positions.push(v.x, v.y, v.z); }
+    const indices = o.geometry.index ? Array.from(o.geometry.index.array) : Array.from({ length: pos.count }, (_, i) => i);
+    out.push({ positions, indices });
+  });
+  return out;
+}
+
+function buildGrowth() {
+  growthGroup = new THREE.Group();
+
+  if (scape.floaters.length) {
+    const d = buildDuckweedArrays({ colonies: scape.floaters, waterLevel: WATER_LEVEL });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(d.positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(d.colors, 3));
+    geo.setAttribute('anchor', new THREE.Float32BufferAttribute(d.anchors, 2));
+    geo.setAttribute('motion', new THREE.Float32BufferAttribute(d.motion, 3));
+    geo.setIndex(d.indices);
+    geo.computeVertexNormals();
+    const mat = new MeshLambertNodeMaterial({ side: THREE.DoubleSide });
+    mat.colorNode = tankColor(attribute('color', 'vec3'));
+    // Each colony rides the same wave the water surface is displaced by, and its roots answer the current: motion is (how far down the root, its length, its phase), and fronds carry zeros.
+    mat.positionNode = Fn(() => {
+      const anchor = attribute('anchor', 'vec2');
+      const mo = attribute('motion', 'vec3');
+      const look = currentUniformsFor('duckweedRoot');
+      const drift = currentOffsetNode(
+        dot(anchor, uCurHeading), mo.x, uClock.add(mo.z.mul(uCurSyncSpan)),
+        mo.y.mul(DUCKWEED.rootSway / CURRENT_DEFAULTS.amplitude).mul(look.sway), look.rate, look.stiffness,
+      );
+      return positionLocal.add(waveDispAt(anchor)).add(vec3(drift.mul(uCurHeading.x), 0, drift.mul(uCurHeading.y)));
+    })();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    growthGroup.add(mesh);
+  }
+
+  const a = buildAlgaeArrays({ surfaces: hardscapeSurfaces(), seed: scape.seed, amount: scape.plantSettings.algae, bounds: TANK });
+  growthDrawn.algae = a.strands;
+  if (a.strands) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(a.positions, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(a.normals, 3));
+    geo.setAttribute('tangent', new THREE.Float32BufferAttribute(a.tangents, 3));
+    geo.setAttribute('side', new THREE.Float32BufferAttribute(a.sides, 1));
+    geo.setAttribute('along', new THREE.Float32BufferAttribute(a.along, 1));
+    geo.setAttribute('sway', new THREE.Float32BufferAttribute(a.sway, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(a.colors, 3));
+    geo.setIndex(a.indices);
+    const mat = new MeshLambertNodeMaterial({ side: THREE.DoubleSide, transparent: true, depthWrite: false });
+    mat.colorNode = tankColor(attribute('color', 'vec3'));
+    mat.opacityNode = float(0.7);
+    // A ribbon widened against the view, so a strand under a millimetre wide still covers pixels.
+    mat.positionNode = Fn(() => {
+      const along = attribute('along', 'float');
+      const sway = attribute('sway', 'vec2');
+      const look = currentUniformsFor('hairAlgae');
+      const drift = currentOffsetNode(
+        sway.x, along, uClock.add(sway.y.mul(uCurSyncSpan)),
+        look.sway, look.rate, look.stiffness,
+      ).mul(ALGAE.sway);
+      // Along the flow, not along local X: the strands are baked in world space, so the heading
+      // goes straight in.
+      const centre = positionLocal.add(vec3(drift.mul(uCurHeading.x), 0, drift.mul(uCurHeading.y)));
+      const axis = normalize(cross(attribute('tangent', 'vec3'), normalize(cameraPosition.sub(centre))));
+      return centre.add(axis.mul(attribute('side', 'float')).mul(oneMinus(along.mul(0.55))).mul(ALGAE.width / 2));
+    })();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 4;
+    growthGroup.add(mesh);
+  }
+  scene.add(growthGroup);
+}
+
+// ---- bubbles ----------------------------------------------------------------
+
+let bubbleMesh = null;
+let bubbleRippleRecords = [];
+let bubbleRipplePrev = [];
+let bubbleRippleLastPop = new Int32Array(0);
+
+function clearBubbles() {
+  bubbleRippleRecords = [];
+  bubbleRipplePrev = [];
+  bubbleRippleLastPop = new Int32Array(0);
+  if (!bubbleMesh) return;
+  scene.remove(bubbleMesh);
+  bubbleMesh.geometry.dispose();
+  bubbleMesh.material.dispose();
+  bubbleMesh = null;
+}
+
+/** One instanced quad mesh; every bubble is moved from the clock in the vertex shader, so nothing runs per frame on the CPU. */
+function buildBubbles() {
+  clearBubbles();
+  const spots = placeBubbleSpots({
+    seed: scape.seed, tank: TANK, count: plantSettings.bubbles, heightAt: scape.heightAt, hardscape: world.hardscape,
+  });
+  const b = buildBubbleArrays({ spots, top: BUBBLE_TOP, seed: scape.seed });
+  bubbleRippleRecords = b.bubbles;
+  bubbleRipplePrev = b.bubbles.map((bubble) => bubbleAt(bubble, uClock.value));
+  bubbleRippleLastPop = new Int32Array(b.count);
+  bubbleRippleLastPop.fill(-2147483648);
+  if (!b.count) return;
+
+  const plane = new THREE.PlaneGeometry(1, 1);
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.index = plane.index;
+  geo.setAttribute('position', plane.attributes.position);
+  geo.setAttribute('uv', plane.attributes.uv);
+  geo.setAttribute('origin', new THREE.InstancedBufferAttribute(new Float32Array(b.origin), 3));
+  geo.setAttribute('timing', new THREE.InstancedBufferAttribute(new Float32Array(b.timing), 4));
+  geo.setAttribute('look', new THREE.InstancedBufferAttribute(new Float32Array(b.look), 4));
+  geo.instanceCount = b.count;
+
+  // Additive, so a bubble only ever adds light: it cannot darken what is behind it in a dim tank.
+  const mat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  mat.positionNode = Fn(() => {
+    const origin = attribute('origin', 'vec3'), tim = attribute('timing', 'vec4'), lk = attribute('look', 'vec4');
+    const clock = uClock.add(tim.y);
+    const cycle = TSLN.floor(clock.div(tim.x));
+    const local = clock.sub(cycle.mul(tim.x)).sub(tim.z);
+    // aquarium-bubbles.js bubbleAt is the CPU twin of everything below; keep them in step.
+    const h = TSLN.fract(sin(TSLN.mod(cycle, 4096).mul(12.9898).add(lk.w.mul(78.233))).mul(43758.5453));
+    const dwellRand = TSLN.fract(sin(lk.w.mul(53.121).add(0.73)).mul(43758.5453));
+    const dwell = float(BUBBLES.dwell[0]).add(dwellRand.mul(BUBBLES.dwell[1] - BUBBLES.dwell[0]));
+    const life = tim.w.add(dwell).add(BUBBLES.popDuration);
+    const alive = TSLN.step(0, local).mul(float(1).sub(TSLN.step(life, local))).mul(TSLN.step(BUBBLES.skip, h));
+    const riseU = clamp(local.div(tim.w), 0, 1);
+    const popProgress = clamp(local.sub(tim.w).sub(dwell).div(BUBBLES.popDuration), 0, 1);
+    // The rising wobble is held at its arrival value; at the surface the water moves the bubble instead.
+    const ang = TSLN.min(local, tim.w).mul(float(1.4).add(TSLN.fract(lk.w.mul(7.31)).mul(1.2)).mul(Math.PI)).add(lk.z);
+    const reach = lk.y.mul(TSLN.sqrt(riseU));
+    const jx = TSLN.fract(h.mul(17.31)).sub(0.5).mul(BUBBLES.jitter);
+    const jz = TSLN.fract(h.mul(91.7)).sub(0.5).mul(BUBBLES.jitter);
+    const radius = lk.x.mul(float(1).add(riseU.mul(BUBBLES.grow))).mul(alive).mul(float(1).sub(popProgress));
+    const rest = vec3(
+      origin.x.add(jx).add(sin(ang).mul(reach)),
+      origin.y.add(riseU.mul(float(BUBBLE_TOP).sub(origin.y))),
+      origin.z.add(jz).add(cos(ang).mul(reach)),
+    );
+    // Rides the water like the duckweed: the same waveDispAt (waves + ripples), blended in over the last of the rise.
+    const centre = rest.add(waveDispAt(rest.xz).mul(smoothstep(0.85, 1.0, riseU)).mul(uBubbleRide));
+    // A quad turned to face the eye, a radius out from its centre each way.
+    const toEye = normalize(cameraPosition.sub(centre));
+    const right = normalize(cross(vec3(0, 1, 0), toEye));
+    const q = positionLocal.xy.mul(2).mul(radius);
+    return centre.add(right.mul(q.x)).add(cross(toEye, right).mul(q.y));
+  })();
+
+  const p = uv().mul(2).sub(1);
+  const d = TSLN.length(p);
+  const key = uBubbleSun.add(uBubbleLamp);
+  const rim = smoothstep(0.5, 0.92, d);
+  const glint = (at, size) => TSLN.exp(pow(TSLN.length(p.sub(at)).div(size), 2).negate());
+  const spec = glint(vec2(-0.36, 0.38), 0.2).add(glint(vec2(0.42, -0.42), 0.3).mul(0.35));
+  // The rim reflects the room, the glints reflect the lights: a bubble follows the tank's light and does not glow in a dark one.
+  const shine = vec3(0.7, 0.88, 1.0).mul(rim.mul(0.55).add(0.12)).mul(uBubbleAmb.add(key.mul(0.5))).add(spec.mul(key));
+  mat.colorNode = tankColor(shine);
+  mat.opacityNode = float(1).sub(smoothstep(0.86, 1.0, d)).mul(0.9);
+
+  bubbleMesh = new THREE.Mesh(geo, mat);
+  bubbleMesh.frustumCulled = false;   // the quad's own bounds are one unit at the origin
+  bubbleMesh.renderOrder = 6;
+  scene.add(bubbleMesh);
+}
+
+const _popWave = {};
+function syncBubbleRipplePops(t) {
+  for (let i = 0; i < bubbleRippleRecords.length; i++) {
+    const bubble = bubbleRippleRecords[i];
+    const prev = bubbleRipplePrev[i];
+    const cur = bubbleAt(bubble, t);
+    const popStarted = cur.popping && cur.y >= BUBBLE_TOP - 1e-6
+      && (!prev || prev.cycle !== cur.cycle || !prev.popping);
+    if (popStarted && bubbleRippleLastPop[i] !== cur.cycle) {
+      const rise = Math.max(1e-3, bubble.timing[3]);
+      const speed = Math.max(0, (bubble.top - bubble.origin[1]) / rise);
+      // Where the bubble is DRAWN: the shader adds waveDispAt, whose sideways part is the Gerstner sum (sampleWaves is its CPU twin).
+      let px = cur.x, pz = cur.z;
+      if (RIPPLE_SETTINGS.bubbleRide && waterProfile?.table && waterProfile.waveModel.value === 1) {
+        const w = sampleWaves(waterProfile.table, cur.x, cur.z, t, waterProfile.disp.value, _popWave);
+        px += w.dx; pz += w.dz;
+      }
+      queueRipple(bubbleRippleSource({ x: px, z: pz, speed, radius: bubble.look[0] }));
+      bubbleRippleLastPop[i] = cur.cycle;
+    }
+    bubbleRipplePrev[i] = cur;
+  }
+}
+
+// ---- plants ---------------------------------------------------------------
+
+function buildPlants() {
+  plantGroup = new THREE.Group();
+  // Pass 1: build every plant and measure it as drawn, swayed at the current's live settings.
+  const built = scape.plants.map((p) => {
+    const geo = buildPlantGeometry({ ...PLANT_PRESETS[p.species], seed: p.seed });
+    geo.computeBoundingBox();
+    const box = geo.boundingBox;
+    // Height AND radius, from aquarium-scape.js, so a species whose leaves splay wider than its
+    // stem is tall cannot grow through the glass.
+    const s = plantTankScale(box, p.species, p.scale, scape.plantSettings.scale);
+    const radius = plantTankRadius(box, s);
+    const height = (box.max.y - box.min.y) * s;
+    geo.translate(0, -box.min.y, 0);
+    geo.scale(s * p.girth, s, s * p.girth);
+    const look = resolveCurrentSpecies(p.species, currentLook[p.species]);
+    const cloud = plantCloud(geo.attributes.position.array, {
+      height, lean: p.lean,
+      swayTip: plantSwayTip(CURRENT_PARAMS, look, p.sway),
+      stiffness: CURRENT_PARAMS.stiffness * look.stiffness,
+    });
+    // Where it stood before: off the glass at rest, by its circumscribed reach.
+    const reach = radius + Math.abs(p.lean);
+    const start = [
+      Math.min(Math.max(p.position[0], TANK.min[0] + reach), TANK.max[0] - reach),
+      Math.min(Math.max(p.position[2], TANK.min[2] + reach), TANK.max[2] - reach),
+    ];
+    return { p, geo, height, cloud, start, rotationY: p.rotationY, attachedTo: p.attachedTo };
+  });
+  // Pass 2: off the glass at full sway, and out of every rock, log and cave. See aquarium-obstacles.js.
+  const t0 = performance.now();
+  const placed = collision.plants ? settlePlants(built, {
+    tank: TANK, heightAt: scape.heightAt, solids: world.hardscape, seed: scape.seed,
+    flow: { heading: currentHeading(CURRENT_PARAMS), bend: CURRENT_PARAMS.bend },
+  }) : built.map((b, index) => ({ index, x: b.start[0], y: scape.heightAt(b.start[0], b.start[1]), z: b.start[1], moved: false }));
+  console.info(`[aquarium] plant placement: ${collision.plants ? 'collision on' : 'collision off'}, ${(performance.now() - t0).toFixed(1)} ms for ${built.length} plants`);
+  const kept = new Set(placed.map((q) => q.index));
+  for (let i = 0; i < built.length; i++) if (!kept.has(i)) built[i].geo.dispose();
+  scape.plantsAsked = scape.plants.length;
+  scape.plants = placed.map((q) => ({ ...built[q.index].p, position: [q.x, q.y, q.z] }));
+
+  const leafClamp = collision.leafClamp;
+  for (const q of placed) {
+    const { p, geo, height } = built[q.index];
+    const cx = q.x, cz = q.z;
+
+    // The per-instance variation reaches the material, so the explicit zero-dryness path is live
+    // data rather than a bypass that happens to be unused. plantTint is the same law plants-gpu.js
+    // mirrors -- this is not a third copy, it is a call to the canonical one.
+    const tint = plantTint(p.variation.hue, p.variation.dryness, p.variation.age);
+    const uTint = uniform(new THREE.Vector3(tint[0], tint[1], tint[2]));
+
+    const uHeight = uniform(height, 'float');
+    const uLean = uniform(p.lean, 'float');       // metres at the tip, in the plant's own frame
+    const uSway = uniform(p.sway, 'float');
+    const uPlantXZ = uniform(new THREE.Vector2(cx, cz));
+    const uRoll = uniform(p.phase, 'float');      // this plant's 0..1 draw; `sync` decides what it buys
+    const look = currentUniformsFor(p.species);
+
+    const mat = new MeshLambertNodeMaterial({ side: THREE.DoubleSide });
+    mat.colorNode = tankColor(attribute('color', 'vec3').mul(uTint));
+    // The sway happens along a WORLD direction, because a current has one direction and everything
+    // standing in it leans the same way. The mesh is spun by its own `rotationY`, so the world
+    // heading has to be turned back into the plant's frame or each plant drifts its own way --
+    // which is what a breeze looks like, not water.
+    //
+    // R(-theta) applied to the heading. With heading (1, 0) this is the (cos, sin) the previous
+    // version hard-coded, so it is the same law generalised to a heading that can be steered.
+    const uRot = uniform(new THREE.Vector2(Math.cos(p.rotationY), Math.sin(p.rotationY)));
+    mat.positionNode = Fn(() => {
+      const h = positionLocal.y.div(uHeight);
+      // How far down the flow this plant stands. THE ONLY thing its phase may depend on -- a
+      // per-plant random phase is what had neighbours leaning opposite ways.
+      const downstream = dot(uPlantXZ, uCurHeading);
+      const offset = currentOffsetNode(
+        downstream, h, uClock.add(uRoll.mul(uCurSyncSpan)),
+        look.sway, look.rate, look.stiffness,
+      ).mul(uSway);
+      const axis = vec2(
+        uCurHeading.x.mul(uRot.x).sub(uCurHeading.y.mul(uRot.y)),
+        uCurHeading.x.mul(uRot.y).add(uCurHeading.y.mul(uRot.x)),
+      );
+      const lx = positionLocal.x.add(offset.mul(axis.x)).add(uLean.mul(h.clamp(0, 1).pow(1.5)));
+      const lz = positionLocal.z.add(offset.mul(axis.y));
+      // Backstop for the live current sliders, which re-place nothing: hold the swayed vertex
+      // inside the glass. Placement already clears it at the settings the tank was built at.
+      const wx = lx.mul(uRot.x).add(lz.mul(uRot.y)).add(uPlantXZ.x)
+        .clamp(TANK.min[0] + 0.001, TANK.max[0] - 0.001).sub(uPlantXZ.x);
+      const wz = lx.mul(uRot.y).negate().add(lz.mul(uRot.x)).add(uPlantXZ.y)
+        .clamp(TANK.min[2] + 0.001, TANK.max[2] - 0.001).sub(uPlantXZ.y);
+      // Toggle off builds the shader without the clamp at all, so its cost can be measured.
+      if (!leafClamp) return vec3(lx, positionLocal.y, lz);
+      return vec3(wx.mul(uRot.x).sub(wz.mul(uRot.y)), positionLocal.y, wx.mul(uRot.y).add(wz.mul(uRot.x)));
+    })();
+
+    const caustic = causticEmissive();
+    if (caustic) mat.emissiveNode = caustic;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(cx, q.y, cz);
+    mesh.rotation.y = p.rotationY;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    plantGroup.add(mesh);
+  }
+  scene.add(plantGroup);
+}
+
+// ---- grass ----------------------------------------------------------------
+
+function buildGrass() {
+  const w = TANK.max[0] - TANK.min[0], d = TANK.max[2] - TANK.min[2];
+  // Blade width and heights are the same numbers passed to createGrass below.
+  const accept = grassAccept({
+    tank: TANK, solids: world.hardscape, lean: grassLean,
+    tipSway: CURRENT_DEFAULTS.amplitude, midSway: CURRENT_DEFAULTS.amplitude * 0.18,
+    halfWidth: 0.0045 / 2, heightMin: 0.035, heightMax: 0.035 + 0.03,
+  });
+  let grassKept = 0, grassDropped = 0;
+  // Off: the old test, which only kept the blade's base 20 mm inside the tank.
+  const inTank = (x, z) => x > TANK.min[0] + 0.02 && x < TANK.max[0] - 0.02 && z > TANK.min[2] + 0.02 && z < TANK.max[2] - 0.02;
+  const test = collision.grass ? accept : inTank;
+  const grassAcceptCounted = (x, z, y) => (test(x, z, y) ? (grassKept++, true) : (grassDropped++, false));
+  const t0 = performance.now();
+  grass = createGrass({
+    seed: scape.seed,
+    count: grassCount,
+    size: Math.max(w, d),
+    bladeWidth: 0.0045,
+    bladeHeight: 0.035,
+    heightVariation: 0.03,
+    baseColor: 0x1d3312,
+    tipColor: 0x4e7a2c,
+    lighting: 'lambert',
+    // grass.js drives its blades with its own wind graph, and forking that shared module for one
+    // page is not worth it. Its constants are retuned to the current's character instead: the wave
+    // frequency is CURRENT_DEFAULTS.frequency in radians per second, and the tip sways far further
+    // than the middle, which is the anchoring the current model argues for.
+    windSpeed: CURRENT_DEFAULTS.frequency * Math.PI * 2,
+    waveSize: 3.0,
+    tipDistance: CURRENT_DEFAULTS.amplitude,
+    centerDistance: CURRENT_DEFAULTS.amplitude * 0.18,
+    cloudStrength: 0,
+    ambient: 0.6,
+    key: 0.5,
+    heightFn: (x, z) => scape.heightAt(x, z),
+    // grass.js leans a tip 0.1 m by default, on blades 3.5-6.5 cm tall: most of the carpet's tips
+    // were through the glass. The lean is a saved setting, and the accept keeps every tip -- at full
+    // lean and full sway -- off the glass and out of every solid.
+    tipOffset: grassLean,
+    acceptFn: grassAcceptCounted,
+  });
+  console.info(`[aquarium] grass: collision ${collision.grass ? 'on' : 'off'}, ${(performance.now() - t0).toFixed(1)} ms to build, ${grassKept} blades kept, ${grassDropped} dropped` +
+    (collision.grass ? ` (glass margin x ${(accept.margins.x * 1000).toFixed(0)} mm, z ${(accept.margins.z * 1000).toFixed(0)} mm, or a solid)` : ''));
+  // Grass builds its own colorNode; wrap it rather than replace it, so the blades keep their
+  // base-to-tip gradient and still sit in the same water as everything else.
+  grass.material.colorNode = tankColor(grass.material.colorNode);
+  // grass.js sets receiveShadow itself; casting is opt-in and 9000 blades is worth it at tank scale.
+  grass.castShadow = true;
+  scene.add(grass);
+}
+
+// ---- flakes ---------------------------------------------------------------
+
+const MAX_FLAKES = 96;
+const flakeDummy = new THREE.Object3D();
+
+function buildFlakes() {
+  const mat = new MeshBasicNodeMaterial();
+  mat.colorNode = tankColor(vec3(0.85, 0.72, 0.42));
+  flakeMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0035, 6, 4), mat, MAX_FLAKES);
+  flakeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  flakeMesh.count = 0;
+  flakeMesh.frustumCulled = false;
+  scene.add(flakeMesh);
+}
+
+// ---- fish -----------------------------------------------------------------
+
+const FISH_OPTS = presetOpts('fish');
+
+// The deformation this page implements is the body wave ALONE. That is exact for this preset
+// rather than an approximation: FAUNA_PRESETS.fish has wings.count 0 and wingAmplitude 0, so
+// fauna-motion.js's hinge branch contributes identically zero. Assert it, because a preset edit
+// that gave a fish wings would otherwise silently render them frozen.
+if (FAUNA_PRESETS.fish.geometry.wings.count !== 0 || FAUNA_PRESETS.fish.motion.wingAmplitude !== 0) {
+  throw new Error('the fish preset grew wings: this page only implements the body wave');
+}
+
+/**
+ * The authored species in `fauna-species/`: the same library the studio saves to.
+ *
+ * Tolerant by design. No server, no manifest, a file that will not parse, or a document the
+ * validator refuses -- any of those leaves the tank with the built-in fish and the models, which
+ * is what it had before, rather than a page that fails to open.
+ *
+ * Wings are the one thing edited on the way in. This page implements the body wave alone, so a
+ * winged document would render its wings frozen mid-beat with nothing to say they were meant to
+ * move; zeroing `wingAmplitude` makes them plain fins on purpose, and logs that it did.
+ */
+async function loadFaunaSpecies() {
+  let files;
+  try {
+    const res = await fetch('fauna-species/manifest.json', { cache: 'no-store' });
+    if (!res.ok) return [];
+    files = await res.json();
+    if (!Array.isArray(files)) return [];
+  } catch { return []; }
+
+  const loaded = [];
+  await Promise.all(files.map(async (file) => {
+    if (typeof file !== 'string' || !file.endsWith('.json')) return;
+    try {
+      const res = await fetch('fauna-species/' + file, { cache: 'no-store' });
+      if (!res.ok) return;
+      const doc = await res.json();
+      const back = deserializeSpecies(doc);
+      if (!back.ok) { console.warn('[aquarium] species refused:', file, back.error); return; }
+      const opts = back.opts;
+      if (opts.type !== 'fish') return;                // a butterfly does not belong in a tank
+      if (opts.geometry.wings.count > 0 && opts.motion.wingAmplitude !== 0) {
+        console.info('[aquarium] ' + file + ': wings held still, this page swims the body wave only');
+        opts.motion = { ...opts.motion, wingAmplitude: 0 };
+      }
+      loaded.push({ slug: file.replace(/\.json$/, ''), opts });
+    } catch (err) { console.warn('[aquarium] species failed:', file, err.message); }
+  }));
+
+  // Sorted, so roster order does not depend on which fetch finished first.
+  loaded.sort((a, b) => a.slug.localeCompare(b.slug));
+  for (const entry of loaded) registerFaunaSpecies(entry.slug, { label: entry.opts.name || entry.slug, opts: entry.opts });
+  return faunaKeys();
+}
+
+// ---- the Stadium models ----------------------------------------------------
+//
+// `models/stadium/` holds the 151 Pokemon Stadium models the lab annotates. Twenty-two of them are
+// aquatic, and six fit a 1.2 m tank; `aquarium-species.js` is the roster and the reason for it.
+//
+// A model fish is NOT a different kind of agent. It has a `size`, a position and a heading exactly
+// as a procedural one does, and `aquarium-world.js`, `aquarium-policy.js` and
+// `aquarium-locomotion.js` are untouched by this: the simulation never learns what a fish looks
+// like, which is the same separation the deterministic policy exists to keep honest.
+//
+// Three facts about these files, all from `docs/stadium/HANDOFF.md`, all of which show up
+// immediately if ignored: vertices are authored 10x in bone-local space so THREE's bounding
+// volumes are garbage and parts vanish with camera angle; some face-decal triangles are wound
+// backwards because the game renders with culling off; and animation must drive the `boneNN`
+// pivots, never the `boneNN_scale` leaves -- which the ROM's own clips already do.
+
+const gltfLoader = new GLTFLoader();
+/** species -> { template, extent, clip } | null when the file would not load. Survives a rebuild. */
+const modelCache = new Map();
+
+/**
+ * Turn one GLTF material into a node material that the water can tint.
+ *
+ * It has to be a REPLACEMENT rather than a wrap. `tankColor` is a TSL graph and GLTFLoader hands
+ * back a plain `MeshStandardMaterial`, which has no colour graph to wrap; a fish drawn with its
+ * own materials would sit in the tank at full brightness while everything around it attenuated,
+ * and read as pasted onto the glass rather than as being in the water.
+ *
+ * Every material in every one of these models is the same shape -- one base colour texture, MASK
+ * alpha at 0.5, metalness 0, roughness 0.9, no vertex colours -- so this carries exactly that and
+ * nothing speculative.
+ */
+function tankMaterialFor(src, body) {
+  const mat = new MeshStandardNodeMaterial();
+  mat.name = src.name;
+  mat.side = THREE.DoubleSide;          // the backwards-wound decals
+  mat.metalness = 0;
+  mat.roughness = src.roughness ?? 0.9;
+  mat.transparent = false;
+  mat.alphaTest = src.alphaTest > 0 ? src.alphaTest : 0.5;
+  const tint = vec3(src.color?.r ?? 1, src.color?.g ?? 1, src.color?.b ?? 1);
+  if (src.map) {
+    const tex = texture(src.map, uv());
+    // vec4, not vec3: `alphaTest` compares the diffuse alpha, and a vec3 colorNode pads it with 1,
+    // so every cut-out fin would render as an opaque rectangle.
+    mat.colorNode = vec4(tankColor(tex.rgb.mul(tint)), tex.a);
+  } else {
+    mat.colorNode = vec4(tankColor(tint), float(1));
+  }
+  if (body) applySwimDeformation(mat, body);
+  return mat;
+}
+
+/**
+ * Bend a Stadium model like something swimming, on top of whatever its ROM clip is doing.
+ *
+ * **Why the clip is not enough.** `idle` is a battle hover: it is authored for an animal holding
+ * station in front of an opponent, so it has no travel in it at all. A model driven by it and
+ * translated by the simulation reads exactly as it looks -- a rigid object being dragged through
+ * water. What a swimming fish does is bend, and bending is the tank's job because only the tank
+ * knows how fast this fish is going and how hard it is turning.
+ *
+ * **It composes with the clip rather than replacing it**, and that is a fact about three rather than
+ * a hope: `NodeMaterial.setupPosition` runs `skinning()` first, writing `positionLocal`, and only
+ * then assigns `positionNode` over it (`three.webgpu.js`, skinning at :21430 and the assignment at
+ * :21458). So everything here reads an already-skinned vertex and deforms that.
+ *
+ * Two deformations, applied in order, each with its own exact normal transform rather than a
+ * re-derived face normal:
+ *
+ *   1. **Twist** -- a rotation about the body axis growing toward the tail, which is what makes a
+ *      beat a corkscrew instead of a windscreen wiper.
+ *   2. **Curve** -- a lateral shear: the travelling body wave, plus a constant bend into whatever
+ *      turn the fish is making. The turn term is the one that answers "it does not curve when it
+ *      turns": a fish coming round to the left swings its tail out to the right, and without it the
+ *      animal pivots like a compass needle.
+ *
+ * `axial` is 0 at the nose and 1 at the tail, from the vertex's own position along the model's
+ * facing axis. `buildCreatureGeometry` supplies that as a `bend` attribute; a GLB has no such
+ * thing, so it is measured off the model's world bounding box at load.
+ */
+function applySwimDeformation(mat, body) {
+  const { uPhase, uAmp, uCurve, uTwist, lagCycles, noseZ, length } = body;
+
+  // 0 at the nose, 1 at the tail. Clamped, because fins and decals can sit outside the box the
+  // body was measured from and a negative axial would flick them the wrong way.
+  const axial = () => clamp(float(noseZ).sub(positionLocal.z).div(float(length)), 0, 1);
+  const angleAt = (a) => float(Math.PI * 2).mul(uPhase.sub(a.mul(float(lagCycles))));
+
+  // --- the two deformations, as position ---
+  // `uAmp` and `uCurve` are FRACTIONS OF BODY LENGTH, so one number means the same bend on a
+  // Shellder as on a Gyarados. These models are authored at wildly different scales -- Goldeen is
+  // 29 units nose to tail and Gyarados 209 -- and an absolute offset would be a twitch on one and a
+  // hairpin on the other.
+  const L = float(length);
+  const twistAngle = (a) => uTwist.mul(a).mul(a).mul(sin(angleAt(a)));
+  const lateral = (a) => uAmp.mul(a).mul(a).mul(sin(angleAt(a))).add(uCurve.mul(a).mul(a)).mul(L);
+
+  // ONE graph, normal first, then position -- and no `normalNode`.
+  //
+  // Three applies `positionNode` BEFORE the skeleton, in the pose the model was authored in, then
+  // skins the result. The bend's normal has to be made in that same space, before skinning, so the
+  // normal is bent HERE by assigning three's own `normalLocal`; three then skins it, converts it to
+  // view space and flips back faces exactly as it does for any model.
+  //
+  // What this replaced was a `normalNode`, and it was wrong twice over. That slot IS the view-space
+  // normal, so a model-space vector lit every animal by its own axes as if they were the camera's.
+  // Worse, it is evaluated per PIXEL, where three's `normalLocal` is rebuilt from the raw attribute:
+  // it never saw the skinning at all. A Gyarados -- authored coiled and reared, re-posed straight by
+  // its skeleton -- was lit with the normals of its battle pose, which is why the front half, the
+  // part posed furthest from how it was modelled, read as lit from below. The shadow bias follows
+  // the same normal, so the lookups on that half went into the body and flickered.
+  // scratchpads/aquarium/skinned-normal-probe.mjs reads both out of the generated shader.
+  mat.positionNode = Fn(() => {
+    const a = axial().toVar();
+    const th = twistAngle(a);
+    const c = cos(th), s = sin(th);
+
+    // --- the normal: the inverse transpose of the map below ---
+    // For a composition (J_shear J_twist)^-T = J_shear^-T J_twist^-T, so the twist's normal
+    // transform runs first and the shear's second. d(axial)/dz is -1/length throughout.
+    const dA = float(-1 / length);
+    const wave = sin(angleAt(a));
+    const dWave = cos(angleAt(a)).mul(float(-2 * Math.PI * lagCycles));
+    const dTwist = uTwist.mul(
+      float(2).mul(a).mul(wave).add(a.mul(a).mul(dWave)),
+    ).mul(dA);
+    const dLateral = uAmp.mul(
+      float(2).mul(a).mul(wave).add(a.mul(a).mul(dWave)),
+    ).add(uCurve.mul(float(2)).mul(a)).mul(float(length)).mul(dA);
+    // Twist: n' = (c nx - s ny, s nx + c ny, -(c A + s B) nx + (s A - c B) ny + nz), with
+    // (A, B) = dTwist * (-s x - c y, c x - s y). positionLocal is still the UNBENT position here --
+    // it is reassigned from what this function returns -- which is exactly what these terms need.
+    const A = dTwist.mul(positionLocal.x.mul(s).negate().sub(positionLocal.y.mul(c)));
+    const B = dTwist.mul(positionLocal.x.mul(c).sub(positionLocal.y.mul(s)));
+    const nx = normalLocal.x.mul(c).sub(normalLocal.y.mul(s));
+    const ny = normalLocal.x.mul(s).add(normalLocal.y.mul(c));
+    const nz = normalLocal.z
+      .sub(c.mul(A).add(s.mul(B)).mul(normalLocal.x))
+      .add(s.mul(A).sub(c.mul(B)).mul(normalLocal.y));
+    // Shear: x' = x + f(z) gives n.z -= f'(z) n.x, applied to the twisted normal.
+    normalLocal.assign(normalize(vec3(nx, ny, nz.sub(dLateral.mul(nx)))));
+
+    // --- the position ---
+    // Twist about the body axis: the cross-section rotates, the axial coordinate does not move.
+    const tx = positionLocal.x.mul(c).sub(positionLocal.y.mul(s));
+    const ty = positionLocal.x.mul(s).add(positionLocal.y.mul(c));
+    // Then the lateral wave and the turn bend, as a pure shear along the body.
+    return vec3(tx.add(lateral(a)), ty, positionLocal.z);
+  })();
+}
+
+/**
+ * Fetch, measure and parse each model species the stock asks for, once.
+ *
+ * The same bytes go two ways, the arrangement `demos/stadium-walker-v2.html` already uses: through
+ * `GLTFLoader` for something to draw, and through `pokemon-rig.js` for something to measure. The
+ * measurement cannot come from the drawn scene, because these models' bounding volumes are
+ * meaningless (fact 1 above) -- `readRigFromGLB` walks the skinned vertices into world space and is
+ * the only size in the building that is true.
+ */
+/**
+ * The straight swimming rest poses, fetched once.
+ *
+ * Three of the roster -- Gyarados, Dratini and Dragonair -- are modelled reared and coiled, because
+ * a Stadium model is posed for battle and none of them ships a clip that straightens one out. The
+ * tank's swim deformation bends a STRAIGHT body along Z, so on a coil it bends a bend and measures
+ * its nose-to-tail axis through empty space. `tools/bake-straight-poses.mjs` lays each skeleton's
+ * spine along Z and writes the result here; `pokemon-straighten.js` is the maths and
+ * `docs/subsystems/aquarium.md` is why.
+ *
+ * A missing or unreadable file is not an error. The animals are simply drawn as the file poses them,
+ * which is what happened before this existed.
+ */
+let straightPoses = null;
+async function loadStraightPoses() {
+  if (straightPoses) return straightPoses;
+  try {
+    const res = await fetch('models/stadium/straight-poses.json');
+    straightPoses = res.ok ? await res.json() : { species: {} };
+  } catch (err) {
+    console.warn('[aquarium] no straight poses, serpents will be drawn coiled:', err.message);
+    straightPoses = { species: {} };
+  }
+  return straightPoses;
+}
+
+/**
+ * Put a baked pose on a loaded model, and say whether it took.
+ *
+ * By bone NAME, because that is the only thing the bake and a loaded scene graph share -- the bake
+ * checks at write time that no two bones in these models share a name. Only the pivots are assigned;
+ * their `_scale` children keep the transform the file authored, which is exactly what the bake
+ * assumed when it computed them.
+ */
+function applyStraightPose(root, record) {
+  let set = 0;
+  root.traverse((o) => {
+    const t = record.bones[o.name];
+    if (!t) return;
+    o.position.set(t.p[0], t.p[1], t.p[2]);
+    o.quaternion.set(t.q[0], t.q[1], t.q[2], t.q[3]);
+    o.scale.set(t.s[0], t.s[1], t.s[2]);
+    set++;
+  });
+  root.updateMatrixWorld(true);
+  return set;
+}
+
+async function loadModels(stock) {
+  const poses = await loadStraightPoses();
+  await Promise.all(modelSpeciesIn(stock).map(async (species) => {
+    if (modelCache.has(species)) return;
+    try {
+      const res = await fetch(modelPath(species));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+
+      const { rig } = readRigFromGLB(new Uint8Array(buf), { source: species });
+      const mn = { x: Infinity, y: Infinity, z: Infinity };
+      const mx = { x: -Infinity, y: -Infinity, z: -Infinity };
+      for (const g of rig.geometry.values()) {
+        for (const a of ['x', 'y', 'z']) { mn[a] = Math.min(mn[a], g.min[a]); mx[a] = Math.max(mx[a], g.max[a]); }
+      }
+      const extent = { x: mx.x - mn.x, y: mx.y - mn.y, z: mx.z - mn.z };
+      const centre = new THREE.Vector3((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2);
+
+      const gltf = await gltfLoader.parseAsync(buf, '');
+      gltf.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        o.frustumCulled = false;                       // the garbage bounding volumes
+        // Set on the TEMPLATE, so every clone of it inherits them -- `Object3D.copy` carries both
+        // flags, and a model that neither casts nor receives sits in the tank lit only by its own
+        // normals: no shadow on the sand under it, no plant shadow falling across it, and a dark
+        // underside that reads as a shadow it is not.
+        o.castShadow = true;
+        o.receiveShadow = true;
+      });
+      // The template keeps its GLTFLoader materials and is never drawn. Materials are built per
+      // FISH at clone time, because the deformation needs this animal's own phase, beat amplitude
+      // and turn -- and a uniform belongs to one material. Six fish of 4-16 materials each is worth
+      // it; sharing them would mean every Goldeen in the tank beating in lockstep with every other.
+      // The textures, which are the expensive part, are shared: only the wrappers multiply.
+      let clip = (gltf.animations || []).find(c => /^idle$/i.test(c.name)) || gltf.animations?.[0] || null;
+      let bounds = { extent, centre, noseZ: mx.z };
+
+      // A straightened animal is a different shape, so its size, its centring and its nose all move
+      // with it -- a coiled Dragonair is 98 units wide and a straight one is nearly all length. The
+      // bake carries those three numbers for exactly this reason; recomputing them from the rest
+      // pose would scale the animal to a box it is no longer in.
+      //
+      // The idle clip goes with them. It is the battle hover that poses the coil in the first place,
+      // and a mixer playing it would overwrite the pose on the first frame.
+      const straight = poseFor(poses, species, rig.hash);
+      if (straight) {
+        const n = applyStraightPose(gltf.scene, straight);
+        bounds = {
+          extent: { ...straight.extent },
+          centre: new THREE.Vector3(straight.centre.x, straight.centre.y, straight.centre.z),
+          noseZ: straight.noseZ,
+        };
+        clip = null;
+        console.info(`[aquarium] ${species} straightened: ${n} bones, ${straight.spine.length} of them spine`);
+      }
+      // The straight pose is the reference, not the look: a serpent is never drawn straight. The
+      // layout says which bones carry the wave and how "up" reads inside each of them, and a record
+      // from before it was baked has none -- that animal still swims, on the fish shader's wave.
+      const spine = straight ? spineLayout(straight) : null;
+      modelCache.set(species, { template: gltf.scene, clip, spine, ...bounds });
+    } catch (err) {
+      console.warn(`[aquarium] ${species} did not load, drawing it as a procedural fish:`, err.message);
+      modelCache.set(species, null);
+    }
+  }));
+}
+
+/**
+ * Put the species' scale, centring and turn onto one drawn model.
+ *
+ * Separate from building it because the controls retune it live: a facing you can only fix by
+ * reloading the page is a facing nobody fixes.
+ *
+ * Rotation order is YXZ so yaw is a turn about the tank's vertical no matter what pitch is set --
+ * with the default XYZ, pitching a fish first would tilt the axis its yaw then turns about, and the
+ * two controls would fight each other.
+ */
+function applyModelLook(r) {
+  const look = speciesTuning(r.fish.species, speciesLook);
+  const scale = modelScale(r.entry.extent, r.fish.size, look.display, MAX_SPAN);
+  r.model.scale.setScalar(scale);
+  // Two measurements the rest of the tank needs, written onto the FISH rather than onto `r`: at
+  // build time this is called with a throwaway record, and anything left on that was lost.
+  //  - drawnLength: a surface move lifts by body lengths, and only this knows what one is.
+  //  - draft: how far the body reaches above its centre. The simulation stops a fish where this
+  //    meets the waterline, so an animal sent to the surface arrives with its top AT it.
+  r.fish.drawnLength = Math.min(r.fish.size * look.display, MAX_SPAN);
+  r.fish.draft = (r.entry.extent.y * scale) / 2;
+  r.model.rotation.order = 'YXZ';
+  r.model.rotation.set(look.pitch, look.yaw, look.roll);
+  // Centre on the fish's position: `world.fish[].position` is the animal's middle, and these models
+  // are authored standing on a battle floor, so an uncentred one hangs above or below its own goal.
+  // The offset is rotated with the model, or turning one would swing it off its own goal point.
+  r.model.position.copy(r.entry.centre).multiplyScalar(-scale).applyEuler(r.model.rotation);
+}
+
+/** One model fish: a cloned skeleton, its own mixer, and a holder that carries the world offsets. */
+function buildModelFish(f, entry) {
+  // A holder the sim drives, and the model INSIDE it carrying scale, centring and the per-species
+  // turn. Baking those onto one object would mean the world orientation overwrote the facing
+  // correction every frame, which is the whole reason the correction exists.
+  const holder = new THREE.Group();
+  const model = skeletonClone(entry.template);
+  holder.add(model);
+  scene.add(holder);
+  applyModelLook({ fish: f, model, entry });
+
+  const style = motionStyle(f.species);
+  const body = {
+    uPhase: uniform(Math.random(), 'float'),
+    uAmp: uniform(0, 'float'),
+    uCurve: uniform(0, 'float'),
+    uTwist: uniform(0, 'float'),
+    lagCycles: BODY_WAVE_LAG_CYCLES,
+    // The nose is the +Z end of the model's own bounding box, and the body runs back from it. Both
+    // come from `pokemon-rig.js`, in the same space `positionLocal` is in after skinning.
+    noseZ: entry.noseZ,
+    length: Math.max(1e-6, entry.extent.z),
+  };
+
+  // Own materials, so this animal has its own beat. The template's GLTFLoader materials are the
+  // source; `tankMaterialFor` rebuilds each one as a node material that the water can tint and the
+  // deformation can bend.
+  const owned = new Map();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const swap = (m) => {
+      if (!owned.has(m)) owned.set(m, tankMaterialFor(m, body));
+      return owned.get(m);
+    };
+    o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+  });
+
+  // A serpent's wave is made of its bones, so each individual needs its OWN bones to turn --
+  // `skeletonClone` gives it those, and finding them by name here is the one lookup it costs.
+  let spineBones = null;
+  if (entry.spine) {
+    spineBones = entry.spine.names.map(n => model.getObjectByName(n));
+    if (spineBones.some(b => !b)) {
+      console.warn(`[aquarium] ${f.species} is missing spine bones, swimming it on the shader instead`);
+      spineBones = null;
+    }
+  }
+
+  const mixer = entry.clip ? new THREE.AnimationMixer(model) : null;
+  if (mixer) {
+    const action = mixer.clipAction(entry.clip);
+    // Offset so a shoal of one species is not six animals breathing in lockstep.
+    action.time = Math.random() * entry.clip.duration;
+    action.play();
+  }
+
+  return {
+    fish: f, mesh: holder, model, entry, mixer, kind: 'model',
+    spineBones,
+    spineOut: spineBones ? { yaw: new Float64Array(spineBones.length), pitch: new Float64Array(spineBones.length) } : null,
+    // Scattered, or a pair of Dratini swim in lockstep.
+    spinePhase: Math.random(),
+    style, body, materials: [...owned.values()], ...initialPose(f),
+  };
+}
+
+/** The built-in fish's body length. An authored species has its own; see `proceduralOpts`. */
+const FISH_BODY_LENGTH = FISH_OPTS.geometry.body.length;
+
+/** The fauna document a procedurally drawn species is built from. */
+function proceduralOpts(species) {
+  const entry = faunaEntry(species);
+  return entry ? entry.opts : FISH_OPTS;
+}
+
+/** Built once PER SPECIES and shared, lazily: a tank need not hold one of everything. */
+function proceduralGeometry(species) {
+  let geo = proceduralGeos.get(species);
+  if (!geo) {
+    geo = buildCreatureGeometry(proceduralOpts(species), { lod: 2 });   // tier 2
+    proceduralGeos.set(species, geo);
+  }
+  return geo;
+}
+
+function buildProceduralFish(f) {
+  const opts = proceduralOpts(f.species);
+  const geo = proceduralGeometry(f.species);
+  const bodyLength = opts.geometry.body.length;
+  const axial = attribute('bend', 'vec2').x;
+
+  const uPhase = uniform(Math.random(), 'float');   // cycles, advanced by speed each frame
+  const uAmp = uniform(0, 'float');
+  const uCurve = uniform(0, 'float');               // a constant bend into the turn, tail-weighted
+
+  // fauna-motion.js bodyWave, transcribed: x = A*axial^2*sin(ang), with the phase lagging along
+  // the body so the wave travels nose to tail. The phase arrives as a uniform rather than from
+  // the epoch clock fauna-gpu.js uses, because that law is stateless by design and cannot change
+  // frequency without jumping -- and here the beat has to follow the fish's actual speed.
+  const angleAt = () => float(Math.PI * 2).mul(uPhase.sub(axial.mul(float(BODY_WAVE_LAG_CYCLES))));
+
+  const mat = new MeshLambertNodeMaterial({ side: THREE.DoubleSide });
+  mat.colorNode = tankColor(attribute('color', 'vec3'));
+  // Normal bent beside the position, by assigning three's own normalLocal -- never a normalNode,
+  // which three reads as an already-view-space normal. See applySwimDeformation.
+  mat.positionNode = Fn(() => {
+    const ang = angleAt();
+    // The Jacobian of the same map, not a re-derived face normal: for the shear M = I + e_x(0,0,c)
+    // the inverse transpose gives n.z -= c*n.x, with d(axial)/dz = -1/bodyLength.
+    const dAxial = uAmp.mul(
+      float(2).mul(axial).mul(sin(ang))
+        .add(axial.mul(axial).mul(cos(ang)).mul(float(-2 * Math.PI * BODY_WAVE_LAG_CYCLES))),
+    ).add(uCurve.mul(float(2)).mul(axial));
+    const c = dAxial.mul(float(-1 / bodyLength));
+    normalLocal.assign(normalize(vec3(normalLocal.x, normalLocal.y, normalLocal.z.sub(c.mul(normalLocal.x)))));
+
+    const x = uAmp.mul(axial).mul(axial).mul(sin(ang)).add(uCurve.mul(axial).mul(axial));
+    return vec3(positionLocal.x.add(x), positionLocal.y, positionLocal.z);
+  })();
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.scale.setScalar(f.size / bodyLength);
+  // A fish's shadow tracking across the sand under it is most of what sells the depth.
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return {
+    fish: f, mesh, uPhase, uAmp, uCurve, kind: 'procedural', opts, bodyLength,
+    style: motionStyle(f.species), ...initialPose(f),
+  };
+}
+
+/** One fish, drawn as whatever its species says it is. The one place that choice is made. */
+function makeFishMesh(f) {
+  const entry = isModelSpecies(f.species) ? modelCache.get(f.species) : null;
+  if (!entry) measureProceduralFish(f);
+  return entry ? buildModelFish(f, entry) : buildProceduralFish(f);
+}
+
+function buildFish() {
+  for (const f of world.fish) fishMeshes.push(makeFishMesh(f));
+}
+
+/**
+ * Every material a fish OWNS, and only those.
+ *
+ * A model fish now owns its materials rather than sharing its species', because the deformation
+ * needs this animal's own phase and turn. Its geometry and textures are still the template's and
+ * must survive it.
+ */
+function disposeFishMaterials(r) {
+  if (r.kind === 'procedural') r.mesh.material.dispose();
+  else for (const m of r.materials || []) m.dispose();
+}
+
+/** Take one fish's mesh out of the tank, leaving everything shared alone. */
+function removeFishMesh(f) {
+  const i = fishMeshes.findIndex(r => r.fish === f);
+  if (i < 0) return;
+  const r = fishMeshes[i];
+  scene.remove(r.mesh);
+  disposeFishMaterials(r);
+  if (r.mixer) r.mixer.stopAllAction();
+  fishMeshes.splice(i, 1);
+}
+
+/**
+ * Change what one fish looks like without disturbing the tank.
+ *
+ * A species change is a change to the fish's durable record, so it is saved; nothing else about the
+ * animal moves. It keeps its position, its velocity, its hunger, its current intent and the
+ * commitment left on it -- a Goldeen that becomes a Horsea mid-hide goes on hiding.
+ */
+async function setFishSpecies(f, species) {
+  f.species = species;
+  // Habit follows the species, because it IS the species: a fish turned into a Shellder should sit
+  // like one. Temperament deliberately does not -- that is this individual's own, it is on a slider
+  // in the inspector, and silently rewriting it would throw away something a person may have set.
+  f.habit = habitRecord(species);
+  // habitRecord gives the species' shipped speed, so the tank's own tuning has to go back on top
+  // of it -- otherwise turning a fish into a Shellder quietly discards the Shellder slider.
+  applySpeciesSpeeds(species);
+  await loadModels([f]);
+  removeFishMesh(f);
+  fishMeshes.push(makeFishMesh(f));
+  saveStock();
+  buildModelControls();
+  buildSpeedControls();
+}
+
+/** Put a fish's current size onto whatever is drawing it. */
+function rescaleFish(r) {
+  if (r.kind === 'model') applyModelLook(r);
+  else {
+    r.mesh.scale.setScalar(r.fish.size / r.bodyLength);
+    measureProceduralFish(r.fish);
+  }
+}
+
+/** A procedural fish's drawn length and draft, from the geometry its own species shares. */
+function measureProceduralFish(f) {
+  const geo = proceduralGeometry(f.species);
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bodyLength = proceduralOpts(f.species).geometry.body.length;
+  f.drawnLength = f.size;
+  f.draft = Math.max(0, geo.boundingBox.max.y) * (f.size / bodyLength);
+}
+
+/**
+ * Take the fish out of the tank.
+ *
+ * Model species are deliberately NOT disposed: their geometry, materials and textures live in
+ * `modelCache` and are shared by every individual of that species, so a rebuild that disposed them
+ * would empty the cache's contents out from under the next tank. Only the clones go, and a clone
+ * owns nothing but its bone objects.
+ */
+function clearFish() {
+  for (const r of fishMeshes) {
+    scene.remove(r.mesh);
+    disposeFishMaterials(r);
+    if (r.mixer) r.mixer.stopAllAction();
+  }
+  for (const geo of proceduralGeos.values()) geo.dispose();   // one geometry per species, shared
+  proceduralGeos.clear();
+  fishMeshes = [];
+}
+
+// ---- how a fish is posed ---------------------------------------------------
+//
+// The simulation gives a position and a unit heading and stops there, which is the right place for
+// it to stop. Everything between that and something that looks alive is here.
+//
+// `Object3D.lookAt` was doing this job and it is not enough. It snaps the model onto the heading
+// every frame, so the only smoothing in the whole chain was the heading easing inside
+// `stepLocomotion` -- and it cannot bank, because a look-at has no roll. The result reads as a
+// rigid object being towed along a path, which is exactly the complaint.
+//
+// So the drawn orientation is its own state, damped toward the heading, and the RATE at which it
+// turns is measured and reused: it banks the animal into the turn and bends its body through it.
+
+const POSE = Object.freeze({
+  // 1/s, how fast the drawn heading catches the simulated one. High, because the simulation's own
+  // heading is now rate-limited: this smoothing existed to hide a heading that could snap, and a
+  // second lag on top of a bounded turn is just a fish drawn pointing where it was.
+  yawRate: 12,
+  pitchRate: 5,        // slower than yaw: a fish pitches reluctantly
+  rollRate: 3.0,
+  turnSmooth: 4.0,     // 1/s on the measured turn rate, or bank jitters on every waypoint
+  turnFull: 2.2,       // rad/s counted as a full-commitment turn
+  maxBank: 0.85,       // rad at full commitment
+  maxCurve: 0.28,      // body lengths of lateral bend at full commitment
+  surfaceRate: 2.5,    // 1/s -- how fast a surface move fades in on arrival and out on leaving
+  settleGap: 0.025,    // m above the bed within which the BED's tilt is the surface it lies on
+  settleRate: 1.6,     // 1/s, how fast it lies down and gets up again
+});
+
+const UP = new THREE.Vector3(0, 1, 0);
+const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+const _qSwim = new THREE.Quaternion();
+const _qRest = new THREE.Quaternion();
+const _basis = new THREE.Matrix4();
+const _fwd = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _n = new THREE.Vector3();
+
+/** The pose state a new fish starts in, already facing the way it is already heading. */
+function initialPose(f) {
+  return {
+    yaw: Math.atan2(f.heading[0], f.heading[2]),
+    pitch: -Math.asin(Math.max(-1, Math.min(1, f.heading[1]))),
+    roll: 0,
+    turn: 0,
+    spinAngle: initialSpin(f.species),
+    settle: 0,
+  };
+}
+
+function wrapPi(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
+
+/**
+ * The substrate's normal under a point, by finite difference on the same `heightAt` the bed is
+ * drawn from. A perching animal takes this tilt, which is what "sitting on the surface" means
+ * rather than "hovering level above it".
+ */
+function bedNormal(x, z, out) {
+  const e = 0.01;
+  const dx = (scape.heightAt(x + e, z) - scape.heightAt(x - e, z)) / (2 * e);
+  const dz = (scape.heightAt(x, z + e) - scape.heightAt(x, z - e)) / (2 * e);
+  return out.set(-dx, 1, -dz).normalize();
+}
+
+const _sq = [0, 0, 0, 1];
+const _surf = { lift: 0, pitchUp: 0, roll: 0, event: false };
+
+function syncFish(dt) {
+  for (const r of fishMeshes) {
+    const f = r.fish;
+    const style = r.style;
+    r.mesh.position.set(f.position[0], f.position[1], f.position[2]);
+
+    const speed = Math.hypot(f.velocity[0], f.velocity[1], f.velocity[2]);
+    const norm = Math.min(1, speed / SWIM.maxSpeed);
+    // How hard the animal is working, which is what the simulation builds its thrust from. The
+    // body reads the SAME number, so a fish that is beating hard is a fish that is accelerating
+    // and a fish that is coasting is holding still -- one cause, not a tail animated off a
+    // velocity that something else decided. Velocity alone cannot tell those apart: a gliding
+    // fish and a driving fish move at the same speed.
+    const effort = typeof f.effort === 'number' ? f.effort : norm;
+
+    // --- orientation, damped rather than snapped -----------------------------
+    // Local +Z is forward for both kinds: `buildCreatureGeometry` puts the head at +Z, and the
+    // Stadium models are posed facing +Z, which is why their default turn is no turn at all.
+    const targetYaw = Math.atan2(f.heading[0], f.heading[2]);
+    const targetPitch = -Math.asin(Math.max(-1, Math.min(1, f.heading[1])));
+    const kYaw = 1 - Math.exp(-POSE.yawRate * motionGain.turn * dt);
+    const dYaw = wrapPi(targetYaw - r.yaw) * kYaw;
+    r.yaw = wrapPi(r.yaw + dYaw);
+    r.pitch += (targetPitch - r.pitch) * (1 - Math.exp(-POSE.pitchRate * dt));
+
+    // The turn rate the animal is ACTUALLY drawn turning at, not the one the simulation asked for.
+    // Smoothed, because an unfiltered per-frame rate makes the bank flicker at every waypoint.
+    const rate = dt > 1e-6 ? dYaw / dt : 0;
+    r.turn += (rate - r.turn) * (1 - Math.exp(-POSE.turnSmooth * dt));
+    const commitment = Math.max(-1, Math.min(1, r.turn / POSE.turnFull));
+
+    // --- settling, for the animals that sit ----------------------------------
+    // A starfish on a rock is not a starfish hovering level above one. `settle` is how much of that
+    // this fish is doing right now, and it damps the swimming motion as well as the pose: a
+    // tumbling, undulating clam is worse than a still one.
+    // The simulation SAYS when an animal has settled -- `goal.mode === 'settle'` is the arrival
+    // phase `aquarium-world.js` gives a perching fish on reaching a solid's perch point. Inferring
+    // it from "slow and near the bed" was wrong twice over: a fish settled on top of a rock is not
+    // near the bed at all, and a settled fish deliberately keeps a small station-keeping speed
+    // (separation and the wall push still act on it), so a speed gate would flicker on and off.
+    const settleTarget = (style.perch && f.motionGoal?.mode === 'settle') ? 1 : 0;
+    r.settle += (settleTarget - r.settle) * (1 - Math.exp(-POSE.settleRate * dt));
+    const active = 1 - r.settle;
+
+    // --- roll: bank into the turn, plus whatever this species does on its own --
+    const bank = commitment * POSE.maxBank * style.bank * motionGain.bank * active;
+    r.roll += (bank - r.roll) * (1 - Math.exp(-POSE.rollRate * dt));
+    r.spinAngle += style.spin * (0.3 + 0.7 * norm) * active * dt;
+
+    // --- at the surface: what this animal does once it is up there ------------
+    // The simulation has it holding station just under the surface; `aquarium-surface.js` says how
+    // that looks -- a Magikarp flopping clear of the water, a Horsea hanging snout-up. Faded in on
+    // arrival and out on leaving, and its clock only runs while it is there, so a move starts from
+    // its beginning each visit rather than from wherever it stopped. Render only: the lift puts the
+    // animal above the water without the simulation ever having it there.
+    const atSurface = f.intent?.activity === 'surface' && f.motionGoal?.mode === 'hold';
+    if (r.surfaceBlend === undefined) { r.surfaceBlend = 0; r.surfaceTime = 0; r.surfaceSeed = surfaceSeed(f.id); }
+    r.surfaceBlend += ((atSurface ? 1 : 0) - r.surfaceBlend) * (1 - Math.exp(-POSE.surfaceRate * dt));
+    if (atSurface) r.surfaceTime += dt;
+    else if (r.surfaceBlend < 0.01) r.surfaceTime = 0;
+    surfaceMovePose(style.surfaceMove, r.surfaceTime, r.surfaceSeed, _surf);
+    const sBlend = r.surfaceBlend;
+
+    // Nose-up is a NEGATIVE pitch in this Euler order, the same way `targetPitch` reads the heading.
+    _e.set(r.pitch - _surf.pitchUp * sBlend, r.yaw, r.roll + r.spinAngle + _surf.roll * sBlend, 'YXZ');
+    _qSwim.setFromEuler(_e);
+
+    if (r.settle > 0.001) {
+      // Lie along the surface, whichever surface it is. On a solid that was measured
+      // (aquarium-perch.js), its fitted normal: the top of a rock or a log is often NOT level, and
+      // laying the body flat on a slope sinks one edge into the rock and lifts the other off it.
+      // Checked before the bed gap, because a low flat rock can sit within settleGap of the sand.
+      // Otherwise, as before: the bed's own gradient near the substrate, up anywhere else.
+      const perchedOn = f.intent?.activity === 'explore'
+        ? world.hardscape.find(h => h.id === f.intent.target) : null;
+      const gap = f.position[1] - f.size * 0.5 - scape.heightAt(f.position[0], f.position[2]);
+      if (perchedOn?.perchSurface) _n.set(...perchedOn.perchSurface.normal);
+      else if (gap < POSE.settleGap) bedNormal(f.position[0], f.position[2], _n);
+      else _n.copy(UP);
+      _fwd.set(Math.sin(r.yaw), 0, Math.cos(r.yaw));
+      _right.crossVectors(_n, _fwd);
+      if (_right.lengthSq() < 1e-8) _right.set(1, 0, 0);          // facing straight up the normal
+      _right.normalize();
+      _fwd.crossVectors(_right, _n).normalize();
+      _basis.makeBasis(_right, _n, _fwd);
+      _qRest.setFromRotationMatrix(_basis);
+      _qSwim.slerp(_qRest, r.settle);
+    }
+    r.mesh.quaternion.copy(_qSwim);
+    if (sBlend > 0.001) r.mesh.position.y += _surf.lift * sBlend * (f.drawnLength || f.size);
+
+    const drawnTop = r.mesh.position.y + fishDraft(f);
+    if (r.rippleAbove === undefined) r.rippleAbove = drawnTop > WATER_LEVEL + 0.001;
+    const above = drawnTop > WATER_LEVEL + 0.001 ? true
+      : drawnTop < WATER_LEVEL - 0.001 ? false : r.rippleAbove;
+    if (above !== r.rippleAbove) {
+      queueRipple(fishRippleSource({
+        x: r.mesh.position.x, z: r.mesh.position.z, size: f.drawnLength || f.size, speed,
+        event: 'crossing', direction: above ? 1 : -1,
+      }));
+    }
+    r.rippleAbove = above;
+
+    if (_surf.event && !r.rippleEventActive) {
+      queueRipple(fishRippleSource({
+        x: r.mesh.position.x, z: r.mesh.position.z, size: f.drawnLength || f.size, speed,
+        event: style.surfaceMove || 'wake',
+      }));
+    }
+    r.rippleEventActive = !!_surf.event;
+
+    const nearSurface = Math.abs(drawnTop - WATER_LEVEL) < Math.max(0.004, f.size * 0.12);
+    if (dt > 0 && nearSurface && speed > 0.015) {
+      r.rippleWakeAge = (r.rippleWakeAge || 0) + dt;
+      const wakeEvery = 0.22 - 0.10 * norm;
+      if (r.rippleWakeAge >= wakeEvery) {
+        r.rippleWakeAge = 0;
+        queueRipple(fishRippleSource({
+          x: r.mesh.position.x, z: r.mesh.position.z, size: f.drawnLength || f.size, speed, event: 'wake',
+        }));
+      }
+    } else {
+      r.rippleWakeAge = 0;
+    }
+
+    // --- the body itself -----------------------------------------------------
+    // Beat and amplitude both come off `effort`, and so does the thrust in the simulation. The
+    // wave sliders below are VISUAL: they scale how much of the beat is drawn, and turning one to
+    // zero gives a stiff fish that still swims. Propulsion lives in `aquarium-locomotion.js`,
+    // where a control that stopped it would have to stop the animal too.
+    const beats = strokeRate(f) * active * dt;
+    if (r.kind === 'model') {
+      // The ROM's idle clip, played at the pace the animal is working at. A mixer's time is its
+      // own state, so scaling `dt` keeps the beat continuous rather than jumping.
+      if (r.mixer) r.mixer.update(dt * (0.35 + 0.95 * effort) * (0.15 + 0.85 * active));
+      const b = r.body;
+      if (r.spineBones) {
+        // A serpent: the SKELETON carries the wave, and the vertex shear is switched off so the
+        // two do not stack. Same beat, same effort, same wave slider and the same turn as a fish, so
+        // one control means one thing across the tank -- only what is bent differs. There is a
+        // floor on the amplitude because a serpent holding station still undulates; drawn still it
+        // reads as a stick.
+        r.spinePhase = (r.spinePhase + beats * style.waveFreq / 1.6) % 1;
+        const drive = SERPENT.idleWave + (1 - SERPENT.idleWave) * effort;
+        spineAngles(r.entry.spine, {
+          phase: r.spinePhase,
+          amp: style.waveAmp * style.wave * motionGain.wave * drive * active,
+          waves: style.bodyWaves,
+          plane: style.wavePlane,
+          curve: commitment * POSE.maxCurve * style.curve * motionGain.curve * active,
+        }, r.spineOut);
+        const layout = r.entry.spine;
+        for (let i = 0; i < r.spineBones.length; i++) {
+          boneQuaternion(layout, i, r.spineOut.yaw[i], r.spineOut.pitch[i], _sq);
+          r.spineBones[i].quaternion.set(_sq[0], _sq[1], _sq[2], _sq[3]);
+        }
+        b.uAmp.value = 0;
+        b.uTwist.value = 0;
+        b.uCurve.value = 0;
+        continue;
+      }
+      b.uAmp.value = style.waveAmp * style.wave * motionGain.wave * (0.10 + 0.90 * effort) * active;
+      b.uTwist.value = style.twist * motionGain.wave * (0.1 + 0.9 * effort) * active;
+      // Sign: a fish coming round to the left (yaw increasing) swings its tail out to the right,
+      // which in a body whose forward is +Z is the +X side.
+      b.uCurve.value = commitment * POSE.maxCurve * style.curve * motionGain.curve * active;
+      b.uPhase.value = (b.uPhase.value + beats * style.waveFreq / 1.6) % 1;
+      continue;
+    }
+
+    // This animal's own document rather than the built-in preset: an authored species beats at
+    // the rate and amplitude it was authored with.
+    const motion = r.opts.motion;
+    r.uAmp.value = motion.bodyWaveAmp * style.wave * motionGain.wave * (0.10 + 0.90 * effort) * active;
+    // In the geometry's own units, where uAmp is too -- the body length is the conversion the
+    // model path does inside the shader.
+    r.uCurve.value = commitment * POSE.maxCurve * style.curve * motionGain.curve * r.bodyLength * active;
+    r.uPhase.value = (r.uPhase.value + beats * motion.bodyWaveFreq / 1.6 * style.waveFreq / 1.6) % 1;
+  }
+}
+
+function syncFlakes() {
+  const n = Math.min(MAX_FLAKES, world.flakes.length);
+  for (let i = 0; i < n; i++) {
+    const p = world.flakes[i].position;
+    flakeDummy.position.set(p[0], p[1], p[2]);
+    flakeDummy.updateMatrix();
+    flakeMesh.setMatrixAt(i, flakeDummy.matrix);
+  }
+  flakeMesh.count = n;
+  flakeMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------- glass
+
+function buildGlass() {
+  const w = TANK.max[0] - TANK.min[0], h = TANK.max[1] - TANK.min[1], d = TANK.max[2] - TANK.min[2];
+
+  // BackSide, so the near pane is not drawn at all. A DoubleSide box lays a flat wash of the glass
+  // colour over the entire view twice -- once per pane -- which reads as a fogged box rather than
+  // as looking into water.
+  //
+  // TRANSPARENT, and that is the difference between a tank and a blue box. An opaque far pane
+  // occludes the background completely, so no setting of the water sliders can ever make the tank
+  // look see-through: you are looking AT a coloured panel, not THROUGH water. With alpha on it the
+  // background shows through, which is what a clean tank actually looks like -- water you can only
+  // see because of its surface and a slight tint on what is furthest away.
+  //
+  // It still runs through the water optics, so the far panes pick up the most attenuation of
+  // anything in the tank. That gradient is what makes murky water legible when the sliders are
+  // pushed that way, without forcing it on a tank meant to look clean.
+  const mat = new MeshBasicNodeMaterial({ side: THREE.BackSide, transparent: true, depthWrite: false });
+  mat.colorNode = tankColor(vec3(0.30, 0.44, 0.48));
+  mat.opacityNode = uGlassOpacity;
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  box.position.set(0, TANK.min[1] + h / 2, 0);
+  scene.add(box);
+
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
+    new THREE.LineBasicMaterial({ color: 0x7e98a4, transparent: true, opacity: 0.55 }),
+  );
+  edges.position.copy(box.position);
+  scene.add(edges);
+
+  buildWaterSurface(w, d);
+}
+
+/**
+ * The water surface, on water-hybrid.js's own wave generators.
+ *
+ * `makeWaterProfile` + `makeWaveFns` are the Gerstner spectrum every other water surface in this
+ * repo is built from, and they are pure node graphs needing only a time and a wind uniform. What
+ * is NOT reused is `createOceanSurface`, which builds a radial grid out to 26 km and wants planar
+ * reflections and an SSR pass -- machinery whose assumptions are Base Game's world, which is
+ * exactly the split the spec's reuse rule asks for.
+ *
+ * The wave table is retuned to tank scale: wavelengths in centimetres rather than the 110 m the
+ * hybrid preset ships, amplitudes in millimetres, and dispersion off, since sqrt(g/k) at these
+ * wavelengths is metres per second and still water in a box does not travel.
+ *
+ * It sits at WATER_LEVEL, which is where addFlakes already drops a flake, so food enters the water
+ * at the surface rather than appearing in mid-air above it.
+ */
+function buildWaterSurface(w, d) {
+  const uWind = uniform(new THREE.Vector2(1, 0.35));
+  waterProfile = makeWaterProfile({ name: 'tank', uTime: uClock, uWind, preset: 'hybrid' });
+  setAquariumWaveLook(waterProfile, causticMotion.value, causticWidth.value);
+  const { waveDisp, waveNormalFold } = makeWaveFns(waterProfile);
+
+  // One physical height field, two optical uses. The visible surface uses the measured ripple
+  // slope; the analytic caustic gets a larger ripple-only slope because this tank's 30 cm throw is
+  // too short for millimetre capillary waves to focus into readable bands without that gain.
+  const gerstnerNormalAt = (xz) => waveNormalFold(xz).xyz;
+  waveNormalAt = (xz) => rippleSystem.combineNormal(
+    xz, gerstnerNormalAt(xz), RIPPLE_VISUAL.surfaceSlopeGain, RIPPLE_VISUAL.surfaceSlopeLimit,
+  );
+  causticWaveNormalAt = (xz) => rippleSystem.combineNormal(
+    xz, gerstnerNormalAt(xz), RIPPLE_VISUAL.causticSlopeGain, RIPPLE_VISUAL.causticSlopeLimit, uRippleCaustics,
+  );
+  // The surface's own shading: gated by the glint toggle, so off means no ripple reads in its fragment shader.
+  const surfaceNormalAt = (xz) => rippleSystem.combineNormal(
+    xz, gerstnerNormalAt(xz), RIPPLE_VISUAL.surfaceSlopeGain, RIPPLE_VISUAL.surfaceSlopeLimit, uRippleGlint,
+  );
+  waveDispAt = (xz) => waveDisp(xz).add(vec3(0, rippleSystem.heightAt(xz), 0));
+
+  const geo = new THREE.PlaneGeometry(w * 0.998, d * 0.998, 96, 48);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new MeshBasicNodeMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false });
+
+  const restXZ = () => vec2(positionLocal.x, positionLocal.z);
+  mat.positionNode = Fn(() => positionLocal.add(waveDispAt(restXZ())))();
+  mat.normalNode = Fn(() => waveNormalAt(restXZ()))();
+
+  // IMPORTANT: this normal is sampled in the FRAGMENT graph, not carried from the 96x48 vertices.
+  // That is where the 192x80 ripple texture's centimetre-scale rings become visible. The material
+  // stays unlit; this is one explicit water-surface reflection term rather than converting the
+  // whole transparent tank surface to a PBR material.
+  const fragmentN = surfaceNormalAt(positionWorld.xz);
+  const fragmentV = normalize(cameraPosition.sub(positionWorld));
+  const fragmentL = causticDir;
+  const halfVector = normalize(fragmentV.add(fragmentL));
+  const ndv = clamp(dot(fragmentN, fragmentV), 0, 1);
+  const ndh = clamp(dot(fragmentN, halfVector), 0, 1);
+  const fresnel = pow(oneMinus(ndv), waterProfile.fresnelPow);
+  const glint = clamp(
+    pow(ndh, RIPPLE_VISUAL.glintExponent)
+      .add(pow(ndh, RIPPLE_VISUAL.glintBroadExponent).mul(RIPPLE_VISUAL.glintBroadWeight))
+      .mul(smoothstep(0.01, 0.18, fragmentL.y)),
+    0, 1,
+  );
+  // Directional specular can legitimately miss the eye. A weaker slope sheen keeps the concentric
+  // packet legible from the front glass as well as from above, while still being driven entirely by
+  // the same per-fragment ripple normal field rather than a painted ring texture.
+  const rippleSlope = TSLN.length(rippleSystem.gradientAt(positionWorld.xz, uRippleGlint));
+  const ringSheen = smoothstep(RIPPLE_VISUAL.sheenSlopeStart, RIPPLE_VISUAL.sheenSlopeFull, rippleSlope);
+  const highlight = clamp(glint.add(ringSheen.mul(RIPPLE_VISUAL.sheenColorWeight)), 0, 1);
+
+  const baseColor = mix(waterProfile.deep, waterProfile.shallow, fresnel);
+  // A glint raises its OWN alpha instead of being multiplied by the 1% clean-water alpha. That is
+  // why rings remain readable through the front glass while the rest of the surface stays nearly
+  // invisible. causticColor follows the selected above-water light and falls back to the sun when
+  // the lamp is submerged, matching the caustic path below.
+  mat.colorNode = mix(baseColor, causticColor.mul(1.35), highlight);
+  const baseOpacity = mix(waterProfile.opacityMin, waterProfile.opacityMax, fresnel).mul(uSurfaceOpacity);
+  mat.opacityNode = clamp(
+    baseOpacity.add(glint.mul(RIPPLE_VISUAL.glintOpacity)).add(ringSheen.mul(RIPPLE_VISUAL.sheenOpacity)),
+    0, 0.62,
+  );
+
+  const surface = new THREE.Mesh(geo, mat);
+  surface.position.set(0, WATER_LEVEL, 0);
+  surface.renderOrder = 8;
+  scene.add(surface);
+
+  // The waterline itself. The edge where water meets glass is the single strongest cue that the
+  // box is full, and a surface seen near-edge-on barely registers without it.
+  const line = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2)),
+    new THREE.LineBasicMaterial({ color: 0xa9d8de, transparent: true, opacity: 0.8 }),
+  );
+  line.position.set(0, WATER_LEVEL, 0);
+  line.renderOrder = 9;
+  scene.add(line);
+}
+
+const sandMaps = await loadSandMaps();
+
+buildGlass();
+
+const saved = store.json(null);
+Object.assign(RIPPLE_SETTINGS, resolveRippleSettings(saved && saved.ripples));
+const startSeed = Number.isFinite(saved && saved.seed) ? saved.seed : 3;
+// An EMPTY saved list is not a saved tank -- a file written before any fish existed would
+// otherwise load as an empty aquarium and stay that way, since the count then reads zero too.
+// `migrateStock` deals a species to every fish in a tank saved before the roster existed, keeping
+// who each one is; a version 2 file is returned untouched, so a tank of six deliberately plain fish
+// stays a tank of six plain fish.
+// The sizing law is handed in, because a version 2 file's sizes were derived by a law that has
+// since changed and have to be re-derived from the settings that file saved, not from the defaults.
+const migrated = migrateStock(saved, saved && saved.fishSizing);
+// A version 3 file with no fish is a tank someone deliberately emptied, and it must come back
+// empty. The fallback below exists for files written BEFORE fish were saved at all, which is a
+// different thing and only ever version 1 or 2.
+const savedFish = migrated.length ? migrated : ((saved && (saved.version | 0) >= STOCK_VERSION) ? [] : null);
+const startCount = savedFish ? savedFish.length : 6;
+// Before the first build, because `buildModelFish` reads it to place and turn every model.
+speciesLook = (saved && saved.speciesLook && typeof saved.speciesLook === 'object') ? saved.speciesLook : {};
+document.getElementById('seed').value = startSeed;
+document.getElementById('count').value = startCount;
+// The sizing law before the build, so a tank generated fresh is drawn from the saved average and
+// spread rather than from the defaults and then immediately resized.
+fishSizing = resolveSizing(saved && saved.fishSizing);
+motionGain = resolveMotionGain(saved && saved.motionGain);
+{
+  const sv = (saved && saved.scape) || {};
+  hardscapeSettings = resolveHardscape(sv.hardscape);
+  plantSettings = resolvePlants(sv.plants);
+  grassCount = Math.max(0, Math.min(30000, Number.isFinite(sv.grassCount) ? sv.grassCount : 9000));
+  grassLean = resolveGrassLean(sv.grassLean);
+  collision = resolveCollision(sv.collision);
+  rollScape = Number.isFinite(sv.roll) ? sv.roll : 0;
+}
+// Its own record, not inside plants. A tank saved with the old single slider gets it as both species' likelihood.
+microfaunaSettings = resolveMicrofauna(saved && saved.microfauna, saved?.scape?.plants?.microfauna);
+{
+  // Before the build: `currentUniformsFor` caches one set of uniforms per species the first time a
+  // plant of that species is made, reading the tuned overrides as it goes.
+  const cv = (saved && saved.current) || {};
+  Object.assign(CURRENT_PARAMS, resolveCurrent(cv.settings));
+  if (cv.look && typeof cv.look === 'object') Object.assign(currentLook, cv.look);
+  applyCurrentUniforms();
+}
+Object.assign(LAMP, resolveLamp(saved && saved.lamp));
+applyLamp();
+await build(startSeed, startCount, savedFish);
+
+// ---------------------------------------------------------------- panel
+
+const playBtn = document.getElementById('play');
+const statsEl = document.getElementById('stats');
+const inspectorEl = document.getElementById('inspector');
+
+// ---- the section shell -----------------------------------------------------
+//
+// Plan rows: [title, group id, cluster heading or null, collapsed by default]. The group is the
+// markup block in `#groups` that gets MOVED into the section body, so the page's reading order and
+// the panel's use order are independent -- bot-viewer-v3.html's SECTION_PLAN, in miniature.
+//
+// What is open by default is what someone opening the tank wants first: the tank's own buttons, and
+// the fish. Everything else is tuning, and tuning that is always open is a wall.
+
+const SECTION_PLAN = [
+  ['Tank', 'tank', 'The tank', false],
+  ['Light', 'light', null, true],
+  ['Lamp', 'lamp', null, true],
+  ['Water', 'water', null, true],
+
+  ['Fish size', 'size', 'Fish', true],
+  ['Swim speed', 'speed', null, true],
+  ['Swimming motion', 'motion', null, true],
+  ['Pokémon models', 'models', null, true],
+  ['Every fish', 'inspector', null, false],
+
+  ['Rocks & wood', 'rocks', 'The scape', true],
+  ['Plants', 'plants', null, true],
+  ['Micro fauna', 'microfauna', null, true],
+  ['Current', 'current', null, true],
+  ['Collision', 'collision', null, true],
+
+  ['Readings', 'stats', 'Reading the scene', true],
+];
+
+const sectionHost = document.getElementById('sections');
+const groupsEl = document.getElementById('groups');
+
+function buildSections() {
+  let cluster = null;
+  for (const [title, group, clusterName, collapsed] of SECTION_PLAN) {
+    if (clusterName && clusterName !== cluster) {
+      cluster = clusterName;
+      const head = document.createElement('div');
+      head.className = 'cluster';
+      head.textContent = clusterName;
+      sectionHost.appendChild(head);
+    }
+    const body = createSection(sectionHost, title, { collapsed });
+    const node = groupsEl.querySelector(`[data-group="${group}"]`);
+    if (node) body.appendChild(node);
+    else console.warn(`[aquarium] the section plan names a group "${group}" that the panel does not have`);
+  }
+}
+
+buildSections();
+
+// Top-level instrument tabs. The Tank tab retains the existing collapsible controls unchanged;
+// the other three are read-only/diagnostic layers over the same running virtual aquarium.
+aquariumTabs = createAquariumTabs({
+  host: document.getElementById('panelTabs'),
+  panes: {
+    tank: document.getElementById('tabTank'),
+    neural: document.getElementById('tabNeural'),
+    compare: document.getElementById('tabCompare'),
+    experiments: document.getElementById('tabExperiments'),
+  },
+  initial: 'tank',
+  onChange: (id) => {
+    neuralUI?.setVisible(id === 'neural');
+    if (id === 'compare') compareUI?.refresh();
+  },
+});
+
+neuralUI = mountAquariumNeuralUI(document.getElementById('tabNeural'), {
+  observer: neuralObserver,
+  getController: () => neuralController,
+  getWorld: () => world,
+  telemetry,
+  dropFood: () => dropFoodAt({ count: 6 }),
+});
+compareUI = mountAquariumCompareUI(document.getElementById('tabCompare'), { telemetry, getWorld: () => world });
+experimentUI = mountAquariumExperimentUI(document.getElementById('tabExperiments'), {
+  runner: experimentRunner,
+  telemetry,
+  getWorld: () => world,
+  getController: () => neuralController,
+  captureStock: () => stockRecords(),
+  resetForReplicate: resetForExperiment,
+  setRunning: (on) => { running = !!on; playBtn.textContent = running ? 'Pause' : 'Play'; },
+  dropFood: (ev) => dropFoodAt(ev),
+  // Protocol steps can change fish-1's species without changing its identity, size or temperament.
+  // The override is applied to a clone of the stock captured when Run starts, so step 2 never
+  // inherits step 1's species by accident. Habit follows species exactly as setFishSpecies() does.
+  speciesOptions: () => rosterOptions(),
+  getFish1: () => world?.fish?.find(f => f.id === 'fish-1') || world?.fish?.[0] || null,
+  prepareStockForFish1Species: (stock, species) => stockWithFishSpecies(stock, {
+    fishId: 'fish-1', species, habitForSpecies: habitRecord,
+  }),
+});
+neuralUI.setVisible(false);
+
+// Minimising and the open/close-all pair. `ui` rides in the stock file rather than in
+// `localStorage`: web storage dies when site data is cleared or the static server comes up on a
+// different port, and the tank already has a file.
+let panelMinimised = false;
+const panelEl = document.getElementById('panel');
+
+function setPanelMinimised(on) {
+  panelMinimised = !!on;
+  panelEl.classList.toggle('min', panelMinimised);
+  document.getElementById('panelMin').textContent = panelMinimised ? '≡' : '–';
+  document.getElementById('panelMin').title = panelMinimised ? 'Open the panel' : 'Minimise the panel';
+  // The canvas is sized against a fixed PANEL width, so a minimised panel would otherwise leave a
+  // band of background where the panel used to be.
+  resizeRenderer();
+}
+
+document.getElementById('panelMin').onclick = () => { setPanelMinimised(!panelMinimised); saveStock(); };
+document.getElementById('expandAll').onclick = () => { setAllSectionsCollapsed(sectionHost, false); saveStock(); };
+document.getElementById('collapseAll').onclick = () => { setAllSectionsCollapsed(sectionHost, true); saveStock(); };
+// A click anywhere on a section head toggles it, and every one of those is worth remembering.
+sectionHost.addEventListener('click', (e) => { if (e.target.closest('.sec-head')) saveStock(); });
+
+function uiState() {
+  return { minimised: panelMinimised, activeTab: aquariumTabs?.current || 'tank', sections: readSectionStates(sectionHost) };
+}
+
+function applyUiState(state) {
+  if (!state || typeof state !== 'object') return;
+  applySectionStates(sectionHost, state.sections);
+  aquariumTabs?.select(state.activeTab || 'tank');
+  setPanelMinimised(!!state.minimised);
+}
+
+applyUiState(saved && saved.ui);
+
+playBtn.onclick = () => { running = !running; playBtn.textContent = running ? 'Pause' : 'Play'; };
+function dropFoodAt({ x = null, z = 0, count = 6, spread = 0.04 } = {}) {
+  const px = x == null ? (Math.random() - 0.5) * 0.7 : Number(x);
+  const before = new Set(world.flakes.map(f => f.id));
+  addFlakes(world, { x: px, z: Number(z) || 0, count: Math.max(1, Number(count) || 1), spread });
+  const landed = world.flakes.filter(f => !before.has(f.id));
+  for (const flake of landed) queueRipple(flakeRippleSource({ x: flake.position[0], z: flake.position[2], speed: FLAKE.sinkSpeed, size: 0.0035 }));
+  const ids = landed.map(f => f.id);
+  telemetry.recordFoodDropped({ t: world.time, count: ids.length, x: px, z: Number(z) || 0, flakeIds: ids });
+  return ids;
+}
+async function resetForExperiment(seed, stock) {
+  await build(Math.max(1, Number(seed) | 0), stock?.length ?? world.fish.length, stock || stockRecords());
+  document.getElementById('seed').value = Math.max(1, Number(seed) | 0);
+  syncCountBox(); buildInspector(); buildModelControls(); buildSpeedControls();
+  neuralUI?.refresh(); compareUI?.refresh();
+}
+document.getElementById('feed').onclick = () => dropFoodAt({ count: 6 });
+document.getElementById('reset').onclick = async () => {
+  await build(
+    Math.max(1, document.getElementById('seed').value | 0),
+    Math.max(0, document.getElementById('count').value | 0),
+  );
+  syncCountBox();
+  buildInspector();
+  buildModelControls();
+  buildSpeedControls();
+  saveStock();
+};
+document.getElementById('navdots').onchange = e => { if (navGroup) navGroup.visible = e.target.checked; };
+
+// ---- adding and removing ONE fish -------------------------------------------
+//
+// The count box plus Reset was the only way to get another animal, and it is the wrong shape for
+// the job: Reset regenerates the whole cast from the seed, so wanting one more Goldeen threw away
+// every name, temperament and hand-picked species in the tank. These two do the thing that was
+// actually being asked for -- one fish, of a named species, into the tank that is already there.
+//
+// Nothing rebuilds. The new fish is appended to `world.fish` and gets one mesh; every other animal
+// carries on mid-intent, which is the same promise `setFishSpecies` makes.
+{
+  const addSel = document.getElementById('addSpecies');
+  for (const [value, label] of rosterOptions()) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    addSel.appendChild(opt);
+  }
+  addSel.value = PROCEDURAL_SPECIES;
+
+  document.getElementById('addFish').onclick = async () => {
+    const species = addSel.value;
+    // From the CURRENT stock, so the id and the name are ones nobody is using -- including after
+    // fish have been removed, which is why neither is derived from the count.
+    const record = newFishRecord({ species, stock: stockRecords(), sizing: fishSizing });
+    // Before the fish exists, so it is never drawn as a procedural body for one frame and then
+    // swapped. A species whose file will not load stays in the record and is retried on reload.
+    await loadModels([record]);
+    const f = addFish(world, record);
+    telemetry.event('fish-added', { t: world.time, fishId: f.id, detail: { species: f.species, name: f.name } });
+    // habitRecord gave it the species' shipped speed; the tank's own tuning goes back on top, the
+    // same way it does when a fish changes species.
+    applySpeciesSpeeds(species);
+    fishMeshes.push(makeFishMesh(f));
+    syncCountBox();
+    buildInspector();
+    buildModelControls();
+    buildSpeedControls();
+    saveStock();
+  };
+}
+
+/** The count box follows the tank, never the other way round. It is a generator input, not a total. */
+function syncCountBox() {
+  document.getElementById('count').value = world.fish.length;
+}
+
+function dropFish(f) {
+  removeFishMesh(f);
+  removeFish(world, f.id);
+  telemetry.event('fish-removed', { t: world.time, fishId: f.id, detail: { species: f.species, name: f.name } });
+  syncCountBox();
+  buildInspector();
+  buildModelControls();
+  buildSpeedControls();
+  saveStock();
+}
+
+// ---- model controls --------------------------------------------------------
+//
+// ---- swim speed, per species ------------------------------------------------
+//
+// The table in `aquarium-species.js` says a Shellder is slow and a Goldeen is not, and those numbers
+// were chosen from what the animals look like rather than from watching them in this tank. So they
+// are a default, not a fact, and this is where someone disagrees with them.
+//
+// The value is written THROUGH onto `habit.speed` of every matching fish, because habit is carried
+// on the record and the pure layers read it there. A species string the locomotion layer had to look
+// up would be invisible to a replacement chooser, and every speed set here would revert the moment
+// the policy was swapped -- the same reasoning that put temperament on the individual.
+//
+// It is not only a top speed. `strokeRate` scales the tail beat by the same number, so a fish
+// turned down cruises slower AND beats slower from one cause, rather than from two sliders that
+// have to be kept in agreement by hand. It does NOT touch what a fish chooses to do -- that is
+// `habit.rest`, a different number, and saying otherwise here would be a lie in the legend.
+
+const speedsEl = document.getElementById('speeds');
+
+/**
+ * Push the tuned speed onto every fish of that species, or all of them when none is named.
+ *
+ * Through `speciesTuning`, which takes the TABLE, and never `resolveSpeed`, which takes one
+ * species' record out of it. Handing the whole table to `resolveSpeed` reads `.speed` off the table
+ * itself, finds nothing, and returns the species default -- so the slider wrote a value that
+ * nothing ever read back and the control did exactly nothing. It shipped that way. The page now has
+ * one way to read per-species tuning and it is the same one the orientation and size use.
+ */
+function speciesSpeed(species) {
+  return speciesTuning(species, speciesLook).speed;
+}
+
+function applySpeciesSpeeds(only = null) {
+  if (!world) return;
+  for (const f of world.fish) {
+    if (only && f.species !== only) continue;
+    if (f.habit) f.habit.speed = speciesSpeed(f.species);
+  }
+}
+
+function buildSpeedControls() {
+  const present = speciesIn(world.fish);
+  if (!present.length) { speedsEl.innerHTML = '<div class="legend">No fish in this tank.</div>'; return; }
+  speedsEl.innerHTML = present.map((k) => {
+    const v = speciesSpeed(k);
+    return '<div class="row">' +
+      `<label>${speciesLabel(k)}<input data-species="${k}" type="range"` +
+      ` min="${SPEED_LIMITS.min}" max="${SPEED_LIMITS.max}" step="0.05" value="${v}"></label>` +
+      `<span id="sp_${k}">${v.toFixed(2)}×</span></div>`;
+  }).join('');
+
+  for (const input of speedsEl.querySelectorAll('input[type=range]')) {
+    input.oninput = () => {
+      const species = input.dataset.species;
+      (speciesLook[species] ??= {}).speed = Number(input.value);
+      const v = speciesSpeed(species);
+      document.getElementById(`sp_${species}`).textContent = `${v.toFixed(2)}×`;
+      applySpeciesSpeeds(species);
+      saveStock();
+    };
+  }
+}
+
+document.getElementById('speedReset').onclick = () => {
+  // Only the speed. These entries also hold the orientation someone settled by eye, and dropping
+  // the whole record to reset a speed would throw that away silently.
+  for (const k of Object.keys(speciesLook)) delete speciesLook[k].speed;
+  applySpeciesSpeeds();
+  saveStock();
+  buildSpeedControls();
+};
+
+buildSpeedControls();
+
+// Which way a Stadium model faces cannot be read out of the file -- the bones are unnamed, nothing
+// records a forward axis, and the one thing every model IS is mirror-symmetric across X, which
+// rules X out and leaves the sign along Z as an argument. `aquarium-species.js` makes that argument
+// and these controls settle it, by eye, in the tank, and write the answer to the stock file.
+
+const modelsEl = document.getElementById('models');
+
+/** Re-apply the species look to every drawn fish of that species. */
+function retuneSpecies(species) {
+  for (const r of fishMeshes) if (r.kind === 'model' && r.fish.species === species) applyModelLook(r);
+}
+
+function buildModelControls() {
+  const present = MODEL_KEYS.filter(k => world.fish.some(f => f.species === k));
+  if (!present.length) {
+    modelsEl.innerHTML = '<div class="legend">No Pokémon in this tank.</div>';
+    return;
+  }
+  modelsEl.innerHTML = present.map((k) => {
+    const look = speciesTuning(k, speciesLook);
+    const n = world.fish.filter(f => f.species === k).length;
+    const loaded = !!modelCache.get(k);
+    const row = (key, label, min, max, step) =>
+      `<div class="row"><label>${label}<input data-species="${k}" data-key="${key}" type="range"` +
+      ` min="${min}" max="${max}" step="${step}" value="${look[key]}"></label>` +
+      `<span id="v_${k}_${key}">${look[key].toFixed(2)}</span></div>`;
+    return '<div class="species">' +
+      `<div class="who"><span>${MODEL_SPECIES[k].label}</span><span>` +
+      (loaded ? `${n} in tank` : 'did not load') + '</span></div>' +
+      row('yaw', 'Turn', -Math.PI, Math.PI, 0.01) +
+      row('pitch', 'Tilt', -Math.PI / 2, Math.PI / 2, 0.01) +
+      row('roll', 'Roll', -Math.PI, Math.PI, 0.01) +
+      row('display', 'Size', 0.2, 6, 0.05) +
+      `<div class="row"><button data-reset="${k}">Reset ${MODEL_SPECIES[k].label}</button></div>` +
+    '</div>';
+  }).join('');
+
+  for (const input of modelsEl.querySelectorAll('input[type=range]')) {
+    input.oninput = () => {
+      const { species, key } = input.dataset;
+      (speciesLook[species] ??= {})[key] = Number(input.value);
+      document.getElementById(`v_${species}_${key}`).textContent = Number(input.value).toFixed(2);
+      retuneSpecies(species);
+      saveStock();
+    };
+  }
+  for (const btn of modelsEl.querySelectorAll('button[data-reset]')) {
+    btn.onclick = () => {
+      delete speciesLook[btn.dataset.reset];
+      retuneSpecies(btn.dataset.reset);
+      saveStock();
+      buildModelControls();
+    };
+  }
+}
+
+buildModelControls();
+
+// ---- fish size -------------------------------------------------------------
+//
+// `size` is on the individual and is what the world reads, so these two sliders write THROUGH to
+// every fish and then save. A control that only moved the drawn scale would look like it worked and
+// be gone on the next reload, because the stock file is the truth about who a fish is.
+
+const sizeMeanEl = document.getElementById('sizeMean');
+const sizeSpreadEl = document.getElementById('sizeSpread');
+sizeMeanEl.min = SIZE_LIMITS.min;
+sizeMeanEl.max = SIZE_LIMITS.max;
+
+function applyFishSizes({ save = true } = {}) {
+  for (const f of world.fish) f.size = sizeFor(f.id, fishSizing);
+  for (const r of fishMeshes) rescaleFish(r);
+  syncSizeUI();
+  if (save) saveStock();
+}
+
+function syncSizeUI() {
+  sizeMeanEl.value = fishSizing.mean;
+  sizeSpreadEl.value = fishSizing.spread;
+  document.getElementById('sizeMeanVal').textContent = (fishSizing.mean * 100).toFixed(1) + ' cm';
+  document.getElementById('sizeSpreadVal').textContent = Math.round(fishSizing.spread * 100) + '%';
+}
+
+sizeMeanEl.oninput = () => { fishSizing.mean = Number(sizeMeanEl.value); applyFishSizes(); };
+sizeSpreadEl.oninput = () => { fishSizing.spread = Number(sizeSpreadEl.value); applyFishSizes(); };
+document.getElementById('sizeReroll').onclick = () => { fishSizing.roll += 1; applyFishSizes(); };
+document.getElementById('sizeReset').onclick = () => {
+  fishSizing = resolveSizing({ ...resolveSizing(null), roll: fishSizing.roll });
+  applyFishSizes();
+};
+
+syncSizeUI();
+
+// ---- swimming motion -------------------------------------------------------
+// Uniforms and damping rates, not a rebuild: every one of these is read fresh by `syncFish` on the
+// next frame, so dragging one retunes the tank live the way the water sliders do.
+
+const gainRows = [
+  ['gainWave', 'wave'], ['gainCurve', 'curve'], ['gainBank', 'bank'], ['gainTurn', 'turn'],
+];
+
+function syncMotionUI() {
+  for (const [id, key] of gainRows) {
+    document.getElementById(id).value = motionGain[key];
+    document.getElementById(id + 'Val').textContent = motionGain[key].toFixed(2) + '×';
+  }
+}
+
+for (const [id, key] of gainRows) {
+  document.getElementById(id).oninput = (e) => {
+    motionGain = resolveMotionGain({ ...motionGain, [key]: Number(e.target.value) });
+    syncMotionUI();
+    saveStock();
+  };
+}
+document.getElementById('gainReset').onclick = () => {
+  motionGain = resolveMotionGain(null);
+  syncMotionUI();
+  saveStock();
+};
+
+syncMotionUI();
+
+// Everything the panel owns now exists, so the tank can be drawn into it and written down. Both
+// calls wait until here on purpose: `buildInspector` assigns a `let` declared below, and `saveStock`
+// reads the section shell through `uiState()`.
+buildInspector();
+saveStock();
+
+function pct(v) { return Math.round(v * 100) + '%'; }
+
+// ---- the inspector ---------------------------------------------------------
+//
+// Built ONCE per tank and then only read from. It used to be rewritten through `innerHTML` four
+// times a second, which is fine for six read-only bars and impossible the moment a fish carries a
+// control: a select being re-created under the pointer loses focus, an open dropdown closes, and a
+// slider being dragged jumps back the instant the tick lands.
+
+function buildInspector() {
+  inspectorEl.innerHTML = '';
+  inspectorRows = world.fish.map((f) => {
+    const card = document.createElement('div');
+    card.className = 'fish';
+
+    const top = document.createElement('div');
+    top.className = 'stat';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = f.name;
+    const intent = document.createElement('span');
+    intent.className = 'intent';
+    // Adding without removing is half a control: a tank you can only ever grow is one you have to
+    // Reset to shrink, which is the thing being fixed.
+    const drop = document.createElement('button');
+    drop.textContent = '×';
+    drop.title = 'Remove ' + f.name;
+    drop.style.cssText = 'padding:0 6px;line-height:1.2';
+    drop.onclick = () => dropFish(f);
+    top.append(name, intent, drop);
+
+    // What it looks like. Changing this is the only fish control that rebuilds anything, and it
+    // rebuilds one mesh -- the animal itself carries on mid-intent.
+    const look = document.createElement('div');
+    look.className = 'row';
+    const select = document.createElement('select');
+    for (const [value, label] of rosterOptions()) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      select.appendChild(opt);
+    }
+    select.value = f.species;
+    select.onchange = () => { setFishSpecies(f, select.value).catch(err => console.warn('[aquarium]', err)); };
+    const size = document.createElement('span');
+    size.className = 'intent';
+    look.append(select, size);
+
+    const hungerBar = bar('#b08a6a'), wakeBar = bar('#6a8fb0');
+
+    const foot = document.createElement('div');
+    foot.className = 'stat';
+    const levels = document.createElement('span');
+    const commit = document.createElement('span');
+    foot.append(levels, commit);
+
+    let neural = null, neuralRead = null;
+    if (neuralController?.controls(f)) {
+      neural = document.createElement('div');
+      neural.className = 'stat';
+      const neuralLabel = document.createElement('span');
+      neuralLabel.textContent = 'neural';
+      neuralRead = document.createElement('span');
+      neuralRead.className = 'intent';
+      neuralRead.textContent = 'loading';
+      neural.append(neuralLabel, neuralRead);
+      card.append(top, look, hungerBar.el, wakeBar.el, foot, neural);
+    } else {
+      card.append(top, look, hungerBar.el, wakeBar.el, foot);
+    }
+
+    // Temperament is the whole of a fish's personality as far as the chooser is concerned, and it
+    // is already persisted per fish -- so it needs no new field anywhere to become a control.
+    const temper = createSection(card, 'Temperament', { collapsed: true });
+    for (const key of ['boldness', 'sociability', 'foodDrive', 'curiosity']) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const label = document.createElement('label');
+      label.textContent = key === 'foodDrive' ? 'Food drive' : key[0].toUpperCase() + key.slice(1);
+      const input = document.createElement('input');
+      input.type = 'range'; input.min = 0; input.max = 1; input.step = 0.01;
+      input.value = f.temperament[key] ?? 0.5;
+      const read = document.createElement('span');
+      read.className = 'intent';
+      read.textContent = pct(Number(input.value));
+      input.oninput = () => {
+        f.temperament[key] = Number(input.value);
+        read.textContent = pct(Number(input.value));
+        saveStock();
+      };
+      label.appendChild(input);
+      row.append(label, read);
+      temper.appendChild(row);
+    }
+
+    inspectorEl.appendChild(card);
+    return { fish: f, intent, size, hungerBar, wakeBar, levels, commit, select, neural, neuralRead };
+  });
+}
+
+function bar(color) {
+  const el = document.createElement('div');
+  el.className = 'bar';
+  const fill = document.createElement('i');
+  fill.style.background = color;
+  el.appendChild(fill);
+  return { el, fill };
+}
+
+function updatePanel() {
+  statsEl.innerHTML =
+    '<div class="stat"><span>time</span><span>' + (world.time / 60).toFixed(1) + ' min</span></div>' +
+    '<div class="stat"><span>flakes</span><span>' + world.flakes.length + '</span></div>' +
+    '<div class="stat"><span>hardscape</span><span>' + world.hardscape.map(h => h.kind).join(', ') + '</span></div>' +
+    '<div class="stat"><span>plants</span><span>' + scape.plants.length
+      + (scape.plantsAsked > scape.plants.length ? ' of ' + scape.plantsAsked + ' (no room)' : '') + '</span></div>';
+
+  for (const r of inspectorRows) {
+    const f = r.fish;
+    r.intent.textContent = f.intent
+      ? f.intent.activity + (f.intent.target ? ' → ' + f.intent.target : '') : '—';
+    r.size.textContent = (f.size * 100).toFixed(1) + ' cm';
+    r.hungerBar.fill.style.width = pct(f.hunger);
+    r.wakeBar.fill.style.width = pct(f.wakefulness);
+    r.levels.textContent = 'hunger ' + pct(f.hunger) + ' · awake ' + pct(f.wakefulness);
+    r.commit.textContent = f.commitRemaining.toFixed(1) + 's';
+    if (r.neural) {
+      const ns = neuralController?.statusFor(f);
+      if (!ns) r.neuralRead.textContent = 'off';
+      else if (ns.state !== 'ready') r.neuralRead.textContent = ns.state + (ns.ageMs == null ? '' : ` · ${Math.round(ns.ageMs)}ms`);
+      else {
+        // statusFor() guarantees a ready state has a drive, but keep the inspector defensive so a
+        // transient/reset or future controller implementation cannot take down the render loop.
+        const d = ns.drive;
+        if (!d) r.neuralRead.textContent = 'warming';
+        else r.neuralRead.textContent = `ready · feed ${d.feed.toFixed(2)} · esc ${d.escape.toFixed(2)} · fwd ${d.forward.toFixed(2)} · back ${d.backward.toFixed(2)} · turn ${d.turn >= 0 ? '+' : ''}${d.turn.toFixed(2)}`;
+      }
+    }
+  }
+}
+
+// ---- water controls --------------------------------------------------------
+// Water is judged by eye and nothing else, so it gets real controls rather than a constant someone
+// has to edit and reload. The ranges are wide on purpose: the default clarity shipped at 6 m, a
+// lake's number, which in a 1.2 m tank is indistinguishable from having no colour law at all.
+
+function hex(v) {
+  const c = (x) => Math.round(Math.max(0, Math.min(1, x)) * 255).toString(16).padStart(2, '0');
+  return '#' + c(v.x) + c(v.y) + c(v.z);
+}
+
+const waterSliders = [
+  ['fogDensity', uFogDensity, 'fogDensity', v => v.toFixed(2) + '/m'],
+  ['fogMax', uFogMax, 'fogMax', v => v.toFixed(2)],
+  ['clarity', uClarity, 'clarity', v => v.toFixed(2)],
+  ['depthScale', uDepthScale, 'depthScale', v => v.toFixed(2) + ' m'],
+  ['glassOpacity', uGlassOpacity, 'opacity', v => v.toFixed(2)],
+  ['surfaceOpacity', uSurfaceOpacity, 'surfaceOpacity', v => v.toFixed(2)],
+];
+const waterColors = [
+  ['shallow', uShallow, 'shallow'],
+  ['deep', uDeep, 'deep'],
+  ['fogColor', uFogColor, 'fogColor'],
+];
+
+function syncWaterUI() {
+  for (const [id, u, , fmt] of waterSliders) {
+    document.getElementById(id).value = u.value;
+    document.getElementById(id + 'Val').textContent = fmt(u.value);
+  }
+  for (const [id, u] of waterColors) document.getElementById(id).value = hex(u.value);
+}
+
+for (const [id, u, , fmt] of waterSliders) {
+  document.getElementById(id).oninput = e => {
+    u.value = parseFloat(e.target.value);
+    document.getElementById(id + 'Val').textContent = fmt(u.value);
+  };
+}
+for (const [id, u] of waterColors) {
+  document.getElementById(id).oninput = e => {
+    const c = new THREE.Color(e.target.value);
+    u.value.set(c.r, c.g, c.b);
+  };
+}
+document.getElementById('waterReset').onclick = () => {
+  for (const [, u, key] of waterSliders) u.value = { ...WATER_START, ...GLASS_DEFAULTS }[key];
+  for (const [, u, key] of waterColors) u.value.set(...WATER_START[key]);
+  syncWaterUI();
+};
+
+/**
+ * The two ends of the range, because "how clean is the water" is the question this panel exists to
+ * answer and hunting for it across six sliders is not an answer.
+ *
+ * Clean is genuinely clean: no fog, clarity high enough that Beer-Lambert transmits ~99% across the
+ * whole tank, and glass you can see the background through. What is left to see the water by is the
+ * surface and the waterline -- which is exactly what a freshly filled tank looks like.
+ */
+document.getElementById('waterClean').onclick = () => {
+  // The tank now OPENS clean, so this is the same place Reset goes -- kept as a pair with Murky so
+  // the two ends of the range stay one click apart from wherever the sliders currently are.
+  for (const [, u, key] of waterSliders) u.value = { ...WATER_START, ...GLASS_DEFAULTS }[key];
+  syncWaterUI();
+};
+document.getElementById('waterMurky').onclick = () => {
+  uFogDensity.value = 2.2;
+  uClarity.value = 0.05;
+  uDepthScale.value = 0.5;
+  uGlassOpacity.value = 0.35;
+  uSurfaceOpacity.value = 0.7;
+  syncWaterUI();
+};
+syncWaterUI();
+
+const rippleSliders = [
+  ['rippleStrength', 'strength', v => v.toFixed(2) + '×'],
+  ['rippleDamping', 'damping', v => v.toFixed(2) + '/s'],
+  ['rippleSpeed', 'speed', v => v.toFixed(2) + '×'],
+  ['rippleSubsteps', 'substeps', v => String(Math.round(v))],
+];
+function syncRippleUI() {
+  for (const [id, key, fmt] of rippleSliders) {
+    document.getElementById(id).value = RIPPLE_SETTINGS[key];
+    document.getElementById(id + 'Val').textContent = fmt(RIPPLE_SETTINGS[key]);
+  }
+}
+for (const [id, key, fmt] of rippleSliders) {
+  document.getElementById(id).oninput = (e) => {
+    const next = resolveRippleSettings({ ...RIPPLE_SETTINGS, [key]: parseFloat(e.target.value) });
+    Object.assign(RIPPLE_SETTINGS, next);
+    document.getElementById(id + 'Val').textContent = fmt(RIPPLE_SETTINGS[key]);
+    saveStock();
+  };
+}
+syncRippleUI();
+
+const rippleToggles = [
+  ['rippleEnabled', 'enabled'], ['rippleGlint', 'glint'], ['rippleCaustics', 'caustics'], ['rippleBubbleRide', 'bubbleRide'],
+];
+function applyRippleToggles() {
+  rippleSystem.enabled.value = RIPPLE_SETTINGS.enabled ? 1 : 0;
+  uRippleGlint.value = RIPPLE_SETTINGS.glint ? 1 : 0;
+  uRippleCaustics.value = RIPPLE_SETTINGS.caustics ? 1 : 0;
+  uBubbleRide.value = RIPPLE_SETTINGS.bubbleRide ? 1 : 0;
+}
+for (const [id, key] of rippleToggles) {
+  const el = document.getElementById(id);
+  el.checked = RIPPLE_SETTINGS[key];
+  el.onchange = () => {
+    const wasOn = RIPPLE_SETTINGS.enabled;
+    RIPPLE_SETTINGS[key] = el.checked;
+    // Back on: start from calm water rather than whatever was frozen when it went off.
+    if (key === 'enabled' && el.checked && !wasOn) { rippleQueue.length = 0; rippleSystem.clear(); }
+    applyRippleToggles();
+    saveStock();
+  };
+}
+applyRippleToggles();
+
+// ---- light controls --------------------------------------------------------
+// Every rig setter re-parks the light 50 m out, so each one is followed by fitKeyLight().
+
+const lightSliders = [
+  ['elevation', v => rig.setElevation(v), () => rig.elevation, v => Math.round(v) + '°'],
+  ['azimuth', v => rig.setAzimuth(v), () => rig.azimuth, v => Math.round(v) + '°'],
+  ['sunIntensity', v => rig.setSunIntensity(v), () => rig.dirLight.intensity, v => v.toFixed(2)],
+  ['ambientIntensity', v => rig.setAmbientIntensity(v), () => rig.ambLight.intensity, v => v.toFixed(2)],
+];
+
+function syncLightUI() {
+  for (const [id, , get, fmt] of lightSliders) {
+    document.getElementById(id).value = get();
+    document.getElementById(id + 'Val').textContent = fmt(get());
+  }
+}
+
+for (const [id, set, get, fmt] of lightSliders) {
+  document.getElementById(id).oninput = e => {
+    set(parseFloat(e.target.value));
+    fitKeyLight();
+    document.getElementById(id + 'Val').textContent = fmt(get());
+  };
+}
+document.getElementById('sunColor').oninput = e => { rig.setSunColor(e.target.value); fitKeyLight(); };
+
+const causticRows = [
+  ['causticStrength', uCausticStrength, 'strength', v => v.toFixed(2)],
+  ['causticSpread', uCausticSpread, 'spread', v => v.toFixed(2)],
+  ['causticMotion', causticMotion, 'motion', v => v.toFixed(2) + '×'],
+  ['causticWidth', causticWidth, 'width', v => v.toFixed(2) + '×'],
+];
+function syncCausticUI() {
+  for (const [id, u, , fmt] of causticRows) {
+    document.getElementById(id).value = u.value;
+    document.getElementById(id + 'Val').textContent = fmt(u.value);
+  }
+}
+for (const [id, u, , fmt] of causticRows) {
+  document.getElementById(id).oninput = (e) => {
+    u.value = parseFloat(e.target.value);
+    if (id === 'causticMotion' || id === 'causticWidth')
+      setAquariumWaveLook(waterProfile, causticMotion.value, causticWidth.value);
+    document.getElementById(id + 'Val').textContent = fmt(u.value);
+  };
+}
+syncCausticUI();
+document.getElementById('causticsEnabled').onchange = e => {
+  uCausticsEnabled.value = e.target.checked ? 1 : 0;
+};
+document.getElementById('shadows').onchange = e => {
+  // Toggling renderer.shadowMap.enabled alone leaves stale maps on the materials, so the light's
+  // own castShadow is what goes off and on here.
+  rig.dirLight.castShadow = e.target.checked;
+  // Cancel a refresh already pending: three is about to dispose this light's shadow map.
+  if (!e.target.checked) rig.dirLight.shadow.needsUpdate = false;
+  uSunShadowOn.value = e.target.checked ? 1 : 0;
+};
+
+// ---- lamp ------------------------------------------------------------------
+
+// Height reads against the waterline, because that is the line that changes what the lamp is.
+const lampHeightText = (v) => v >= 0
+  ? `${(v * 100).toFixed(1)} cm above water`
+  : `${(-v * 100).toFixed(1)} cm under water`;
+const lampRows = [
+  ['lampIntensity', 'intensity', (v) => v.toFixed(1)],
+  ['lampHeight', 'height', lampHeightText],
+  ['lampX', 'x', (v) => (v * 100).toFixed(1) + ' cm'],
+  ['lampZ', 'z', (v) => (v * 100).toFixed(1) + ' cm'],
+  ['lampAngle', 'angleDeg', (v) => Math.round(v) + '°'],
+  ['lampPenumbra', 'penumbra', (v) => Math.round(v * 100) + '%'],
+];
+
+function syncLampUI() {
+  for (const [id, key, fmt] of lampRows) {
+    document.getElementById(id).value = LAMP[key];
+    document.getElementById(id + 'Val').textContent = fmt(LAMP[key]);
+  }
+  document.getElementById('lampOn').checked = LAMP.enabled;
+  document.getElementById('lampFixture').checked = LAMP.showFixture;
+  document.getElementById('lampShadows').checked = LAMP.castShadow;
+  document.getElementById('lampColor').value = LAMP.color;
+  document.getElementById('causticSource').value = LAMP.causticsFrom;
+}
+
+/** Every lamp control is a light-property or uniform write, so all of them stay live. */
+function setLamp(patch) {
+  Object.assign(LAMP, resolveLamp({ ...LAMP, ...patch }));
+  applyLamp();
+  saveStock();
+}
+
+for (const [id, key, fmt] of lampRows) {
+  document.getElementById(id).oninput = (e) => {
+    setLamp({ [key]: Number(e.target.value) });
+    document.getElementById(id + 'Val').textContent = fmt(LAMP[key]);
+  };
+}
+document.getElementById('lampOn').onchange = (e) => setLamp({ enabled: e.target.checked });
+document.getElementById('lampFixture').onchange = (e) => setLamp({ showFixture: e.target.checked });
+document.getElementById('lampShadows').onchange = (e) => setLamp({ castShadow: e.target.checked });
+document.getElementById('lampColor').oninput = (e) => setLamp({ color: e.target.value });
+document.getElementById('causticSource').onchange = (e) => setLamp({ causticsFrom: e.target.value });
+document.getElementById('lampReset').onclick = () => {
+  Object.assign(LAMP, resolveLamp(null));
+  applyLamp();
+  syncLampUI();
+  saveStock();
+};
+syncLampUI();
+syncLightUI();
+
+// ---- the scape: rocks, wood and planting ------------------------------------
+//
+// Every one of these REBUILDS rather than editing. A hardscape entity's navPoint is derived from
+// its radius, so growing a rock in place leaves the "swim to the rock" target inside the rock --
+// the fish hovers in stone and nothing looks wrong. Rebuilding also keeps world.hardscape and the
+// drawn meshes one object graph, which is the thing that makes the solid you see and the solid
+// behaviour targets the same solid.
+
+const scapeRows = [
+  ['cave', 'caves'], ['rock', 'rocks'], ['wood', 'wood'],
+];
+
+let rebuildQueued = false;
+/**
+ * Rebuild on the next frame rather than on every input event.
+ *
+ * A dragged slider fires continuously and a rebuild reloads models and rebuilds every mesh in the
+ * tank; doing that per event makes the drag feel broken and can overlap two async builds.
+ */
+function queueScapeRebuild() {
+  if (rebuildQueued) return;
+  rebuildQueued = true;
+  requestAnimationFrame(async () => {
+    rebuildQueued = false;
+    await build(world.seed, world.fish.length, stockRecords());
+    buildInspector();
+    buildModelControls();
+    buildSpeedControls();
+    buildCurrentSpecies();   // a replanted tank can hold species the panel has no rows for yet
+    saveStock();
+  });
+}
+
+/**
+ * Split a slider into the part cheap enough to run per pixel of drag, and the part that is not.
+ *
+ * `live` runs on every `input`: the readout and the settings state, so the number under the nub
+ * tracks the nub. `commit` runs on `change`, which a range input fires when the nub is RELEASED
+ * (and once per press for the arrow keys). Rebuilding the tank belongs in `commit` -- it re-meshes
+ * the substrate, the hardscape, every plant and up to 30k grass blades, and doing that once per
+ * drag pixel is what made the panel feel like it was towing the tank behind it.
+ *
+ * `change` does not fire when the value ends where it started, which is right: `live` has already
+ * written the settings, so there is nothing left to rebuild.
+ *
+ * Only for the sliders that rebuild. A uniform write is cheaper than the event that carries it, and
+ * deferring one of those to release would make a slider that works feel broken instead.
+ */
+function onSlide(id, live, commit) {
+  const el = typeof id === 'string' ? document.getElementById(id) : id;
+  if (!el) throw new Error(`onSlide: no slider ${id}`);
+  el.oninput = live;
+  el.onchange = commit;
+  return el;
+}
+
+function syncScapeUI() {
+  for (const [id, key] of scapeRows) {
+    const cfg = hardscapeSettings[key];
+    document.getElementById(id + 'Count').value = cfg.count;
+    document.getElementById(id + 'CountVal').textContent = cfg.count;
+    document.getElementById(id + 'Min').value = cfg.radius[0];
+    document.getElementById(id + 'Max').value = cfg.radius[1];
+    document.getElementById(id + 'SizeVal').textContent =
+      `${(cfg.radius[0] * 100).toFixed(1)}–${(cfg.radius[1] * 100).toFixed(1)} cm`;
+  }
+  document.getElementById('plantCount').value = plantSettings.count;
+  document.getElementById('plantCountVal').textContent = plantSettings.count;
+  document.getElementById('plantScale').value = plantSettings.scale;
+  document.getElementById('plantScaleVal').textContent = Math.round(plantSettings.scale * 100) + '%';
+  document.getElementById('plantClump').value = plantSettings.clump;
+  document.getElementById('plantClumpVal').textContent = Math.round(plantSettings.clump * 100) + '%';
+  document.getElementById('duckweedCount').value = plantSettings.duckweed;
+  document.getElementById('duckweedCountVal').textContent = plantSettings.duckweed;
+  document.getElementById('algaeAmount').value = plantSettings.algae;
+  document.getElementById('algaeAmountVal').textContent = Math.round(plantSettings.algae * 100) + '%';
+  document.getElementById('bubbleCount').value = plantSettings.bubbles;
+  document.getElementById('bubbleCountVal').textContent = plantSettings.bubbles;
+  syncMicrofaunaUI();
+  document.getElementById('grassCount').value = grassCount;
+  document.getElementById('grassCountVal').textContent = grassCount.toLocaleString();
+  document.getElementById('grassLean').value = grassLean;
+  document.getElementById('grassLeanVal').textContent = Math.round(grassLean * 1000) + ' mm';
+  document.getElementById('colPlants').checked = collision.plants;
+  document.getElementById('colLeafClamp').checked = collision.leafClamp;
+  document.getElementById('colGrass').checked = collision.grass;
+}
+
+for (const [id, key] of scapeRows) {
+  onSlide(id + 'Count', (e) => {
+    hardscapeSettings = resolveHardscape({ ...hardscapeSettings, [key]: { ...hardscapeSettings[key], count: Number(e.target.value) } });
+    syncScapeUI();
+  }, queueScapeRebuild);
+  // The two radius handles share a range. resolveHardscape orders them, so dragging min past max
+  // swaps rather than inverting -- an inverted range would draw every piece at one size.
+  for (const [end, idx] of [['Min', 0], ['Max', 1]]) {
+    onSlide(id + end, (e) => {
+      const radius = [...hardscapeSettings[key].radius];
+      radius[idx] = Number(e.target.value);
+      hardscapeSettings = resolveHardscape({ ...hardscapeSettings, [key]: { ...hardscapeSettings[key], radius } });
+      syncScapeUI();
+    }, queueScapeRebuild);
+  }
+}
+
+onSlide('plantCount', (e) => {
+  plantSettings = resolvePlants({ ...plantSettings, count: Number(e.target.value) });
+  syncScapeUI();
+}, queueScapeRebuild);
+onSlide('plantScale', (e) => {
+  plantSettings = resolvePlants({ ...plantSettings, scale: Number(e.target.value) });
+  syncScapeUI();
+}, queueScapeRebuild);
+// Cheap, so it acts on every input and rebuilds nothing but the bubbles: the scape stays as it is.
+document.getElementById('bubbleCount').oninput = (e) => {
+  plantSettings = resolvePlants({ ...plantSettings, bubbles: Number(e.target.value) });
+  syncScapeUI(); buildBubbles(); saveStock();
+};
+onSlide('duckweedCount', (e) => {
+  plantSettings = resolvePlants({ ...plantSettings, duckweed: Number(e.target.value) });
+  syncScapeUI();
+}, queueScapeRebuild);
+onSlide('algaeAmount', (e) => {
+  plantSettings = resolvePlants({ ...plantSettings, algae: Number(e.target.value) });
+  syncScapeUI();
+}, queueScapeRebuild);
+/**
+ * Micro fauna: a list of species, edited one at a time through the dropdown, the way the fish panel
+ * keeps its settings per species. Size and model are baked into a species' geometry, so they rebuild
+ * it on release; every other control acts live.
+ */
+function mfCurrent() {
+  return microfaunaSettings.species.find(s => s.id === mfSelected) || microfaunaSettings.species[0] || null;
+}
+function mfSizeT(mm) { const r = MICROFAUNA_CONTROLS.size; return Math.log(mm / r.min) / Math.log(r.max / r.min); }
+function mfSizeMm(t) { const r = MICROFAUNA_CONTROLS.size; return r.min * Math.pow(r.max / r.min, t); }
+
+function syncMicrofaunaUI() {
+  const el = (id) => document.getElementById(id);
+  const model = el('mfModel');
+  if (!model.options.length) {
+    for (const k of MICROFAUNA_MODEL_KEYS) {
+      const o = document.createElement('option');
+      o.value = k; o.textContent = MICROFAUNA_MODELS[k].label;
+      model.appendChild(o);
+    }
+  }
+  const list = microfaunaSettings.species;
+  el('mfSpecies').replaceChildren(...list.map((s) => {
+    const o = document.createElement('option');
+    o.value = String(s.id); o.textContent = s.name;
+    return o;
+  }));
+  const cur = mfCurrent();
+  for (const id of ['mfSpecies', 'mfName', 'mfModel', 'mfSize', 'mfSpeed', 'mfCount', 'mfChance', 'mfSpread', 'mfDepth', 'mfDraw', 'mfRemove']) el(id).disabled = !cur;
+  el('mfAdd').disabled = list.length >= MICROFAUNA.maxSpecies;
+  if (!cur) {
+    for (const id of ['mfSizeVal', 'mfSpeedVal', 'mfCountVal', 'mfChanceVal', 'mfSpreadVal', 'mfDepthVal', 'mfDrawVal']) el(id).textContent = '';
+    el('mfName').value = '';
+    return;
+  }
+  mfSelected = cur.id;
+  el('mfSpecies').value = String(cur.id);
+  // Not while typing in it: rewriting a focused field moves the caret.
+  if (document.activeElement !== el('mfName')) el('mfName').value = cur.name;
+  model.value = cur.model;
+  el('mfSize').value = mfSizeT(cur.size);
+  el('mfSizeVal').textContent = (cur.size < 1 ? cur.size.toFixed(2) : cur.size.toFixed(1)) + ' mm';
+  el('mfSpeed').value = cur.speed;
+  el('mfSpeedVal').textContent = cur.speed.toFixed(2) + '×';
+  el('mfCount').value = cur.count;
+  el('mfCountVal').textContent = String(cur.count);
+  el('mfChance').value = cur.chance;
+  el('mfChanceVal').textContent = Math.round(cur.chance * 100) + '%';
+  el('mfSpread').value = cur.spread;
+  el('mfSpreadVal').textContent = Math.round(cur.spread * 100) + '%';
+  el('mfDepth').value = cur.depth;
+  el('mfDepthVal').textContent = Math.round(cur.depth * 1000) + ' mm';
+  el('mfDraw').value = cur.drawDistance;
+  el('mfDrawVal').textContent = cur.drawDistance.toFixed(2) + ' m';
+}
+
+function mfEdit(patch) {
+  const cur = mfCurrent();
+  if (!cur) return;
+  microfaunaSettings = resolveMicrofauna({
+    ...microfaunaSettings,
+    species: microfaunaSettings.species.map(s => (s.id === cur.id ? { ...s, ...patch } : s)),
+  });
+  syncMicrofaunaUI();
+}
+function mfCommit() { microfauna.apply(microfaunaSettings); saveStock(); }
+
+document.getElementById('mfSpecies').onchange = (e) => { mfSelected = Number(e.target.value); syncMicrofaunaUI(); };
+document.getElementById('mfAdd').onclick = () => {
+  const s = newSpecies(microfaunaSettings, mfCurrent()?.model ?? 'zooplankton');
+  microfaunaSettings = resolveMicrofauna({ ...microfaunaSettings, species: [...microfaunaSettings.species, s] });
+  mfSelected = s.id;
+  syncMicrofaunaUI(); mfCommit();
+};
+document.getElementById('mfRemove').onclick = () => {
+  const cur = mfCurrent();
+  if (!cur) return;
+  microfaunaSettings = resolveMicrofauna({ ...microfaunaSettings, species: microfaunaSettings.species.filter(s => s.id !== cur.id) });
+  mfSelected = microfaunaSettings.species[0]?.id ?? 0;
+  syncMicrofaunaUI(); mfCommit();
+};
+document.getElementById('mfReset').onclick = () => {
+  microfaunaSettings = resolveMicrofauna(null);
+  mfSelected = microfaunaSettings.species[0].id;
+  syncMicrofaunaUI(); mfCommit();
+};
+document.getElementById('mfName').oninput = (e) => mfEdit({ name: e.target.value });
+document.getElementById('mfName').onchange = () => { syncMicrofaunaUI(); saveStock(); };
+document.getElementById('mfModel').onchange = (e) => { mfEdit({ model: e.target.value }); mfCommit(); };
+// Size rebuilds the species, so it acts on release. The slider is logarithmic: 0.02-6 mm is a 300x range.
+document.getElementById('mfSize').oninput = (e) => mfEdit({ size: Number(mfSizeMm(Number(e.target.value)).toFixed(3)) });
+document.getElementById('mfSize').onchange = mfCommit;
+for (const [id, key] of [['mfSpeed', 'speed'], ['mfCount', 'count'], ['mfChance', 'chance'], ['mfSpread', 'spread'], ['mfDepth', 'depth'], ['mfDraw', 'drawDistance']]) {
+  document.getElementById(id).oninput = (e) => { mfEdit({ [key]: Number(e.target.value) }); mfCommit(); };
+}
+onSlide('plantClump', (e) => {
+  plantSettings = resolvePlants({ ...plantSettings, clump: Number(e.target.value) });
+  syncScapeUI();
+}, queueScapeRebuild);
+onSlide('grassCount', (e) => {
+  grassCount = Math.max(0, Math.min(30000, Number(e.target.value)));
+  syncScapeUI();
+}, queueScapeRebuild);
+document.getElementById('colPlants').onchange = (e) => { collision = { ...collision, plants: e.target.checked }; queueScapeRebuild(); };
+document.getElementById('colGrass').onchange = (e) => { collision = { ...collision, grass: e.target.checked }; queueScapeRebuild(); };
+document.getElementById('colLeafClamp').onchange = (e) => { collision = { ...collision, leafClamp: e.target.checked }; queueScapeRebuild(); };
+onSlide('grassLean', (e) => {
+  grassLean = resolveGrassLean(Number(e.target.value));
+  syncScapeUI();
+}, queueScapeRebuild);
+
+// ---- current ---------------------------------------------------------------
+
+// Every one of these is a uniform write, so they stay live on `oninput` rather than waiting for the
+// nub -- see onSlide above for the ones that do not.
+const currentRows = [
+  ['curHeading', 'headingDeg', (v) => Math.round(v) + '°'],
+  ['curAmplitude', 'amplitude', (v) => (v * 100).toFixed(1) + ' cm'],
+  ['curFrequency', 'frequency', (v) => v.toFixed(2) + ' Hz'],
+  ['curBend', 'bend', (v) => Math.round(v * 100) + '%'],
+  ['curSkew', 'skew', (v) => v.toFixed(2)],
+  ['curStiffness', 'stiffness', (v) => v.toFixed(2)],
+  ['curSpatial', 'spatial', (v) => v.toFixed(1) + ' rad/m'],
+  ['curPhaseLag', 'phaseLag', (v) => v.toFixed(1) + ' rad'],
+  ['curSync', 'sync', (v) => Math.round(v * 100) + '%'],
+];
+
+/** `javaMoss` -> `Java moss`. The preset keys are camelCase and the panel is not. */
+const CURRENT_LABELS = { duckweedRoot: 'Duckweed roots', hairAlgae: 'Hair algae' };
+function plantLabel(key) {
+  if (CURRENT_LABELS[key]) return CURRENT_LABELS[key];
+  const spaced = key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Which plant species are actually standing in the tank, in a stable order. */
+function plantSpeciesPresent() {
+  const seen = [];
+  for (const p of scape.plants) if (!seen.includes(p.species)) seen.push(p.species);
+  seen.sort();
+  // Not plants, but they answer the same current, so they get the same rows while they are in the tank.
+  if (scape.floaters.length) seen.push('duckweedRoot');
+  if (growthDrawn.algae) seen.push('hairAlgae');
+  return seen;
+}
+
+const curSpeciesEl = document.getElementById('curSpecies');
+// Widened after finding tuned values sitting exactly on the old maxima (rate 3, stiffness 4).
+// A value at the rail is a control that ran out, not a choice.
+const SPECIES_AXES = [['sway', 'Sway', 0, 6, 0.01], ['rate', 'Rate', 0, 6, 0.01], ['stiffness', 'Stiffness', 0.1, 8, 0.01]];
+
+function buildCurrentSpecies() {
+  const present = plantSpeciesPresent();
+  if (!present.length) { curSpeciesEl.innerHTML = ''; return; }
+  curSpeciesEl.innerHTML = present.map((k) => {
+    const r = resolveCurrentSpecies(k, currentLook[k]);
+    const rows = SPECIES_AXES.map(([key, label, lo, hi, step]) =>
+      `<div class="row"><label>${label} <input data-species="${k}" data-key="${key}" type="range"` +
+      ` min="${lo}" max="${hi}" step="${step}" value="${r[key]}"></label>` +
+      `<span id="cs_${k}_${key}">${r[key].toFixed(2)}×</span></div>`).join('');
+    return `<div class="sub"><div class="subhead">${plantLabel(k)}</div>${rows}</div>`;
+  }).join('');
+
+  for (const input of curSpeciesEl.querySelectorAll('input[type=range]')) {
+    input.oninput = () => {
+      const { species, key } = input.dataset;
+      const v = Number(input.value);
+      (currentLook[species] ??= { ...resolveCurrentSpecies(species) })[key] = v;
+      currentUniformsFor(species)[key].value = v;
+      document.getElementById(`cs_${species}_${key}`).textContent = v.toFixed(2) + '×';
+      saveStock();
+    };
+  }
+}
+
+function syncCurrentUI() {
+  for (const [id, key, fmt] of currentRows) {
+    document.getElementById(id).value = CURRENT_PARAMS[key];
+    document.getElementById(id + 'Val').textContent = fmt(CURRENT_PARAMS[key]);
+  }
+}
+
+for (const [id, key, fmt] of currentRows) {
+  document.getElementById(id).oninput = (e) => {
+    CURRENT_PARAMS[key] = Number(e.target.value);
+    applyCurrentUniforms();
+    document.getElementById(id + 'Val').textContent = fmt(CURRENT_PARAMS[key]);
+    saveStock();
+  };
+}
+
+document.getElementById('curReset').onclick = () => {
+  Object.assign(CURRENT_PARAMS, resolveCurrent(null));
+  for (const k of Object.keys(currentLook)) delete currentLook[k];
+  for (const [species, u] of currentUniforms) {
+    const r = resolveCurrentSpecies(species);
+    u.sway.value = r.sway; u.rate.value = r.rate; u.stiffness.value = r.stiffness;
+  }
+  applyCurrentUniforms();
+  syncCurrentUI();
+  buildCurrentSpecies();
+  saveStock();
+};
+
+syncCurrentUI();
+buildCurrentSpecies();
+
+// Reroll changes the scape's own seed, not world.seed: a new arrangement of the same tank, with
+// the same fish. Rerolling the fish is what the Tank section's seed field is for.
+document.getElementById('scapeReroll').onclick = () => { rollScape += 1; queueScapeRebuild(); };
+document.getElementById('plantReroll').onclick = () => { rollScape += 1; queueScapeRebuild(); };
+document.getElementById('scapeReset').onclick = () => {
+  hardscapeSettings = resolveHardscape(null);
+  syncScapeUI(); queueScapeRebuild();
+};
+document.getElementById('plantReset').onclick = () => {
+  plantSettings = resolvePlants(null);
+  grassCount = 9000;
+  grassLean = GRASS_LEAN.default;
+  syncScapeUI(); queueScapeRebuild();
+};
+syncScapeUI();
+
+// ---------------------------------------------------------------- frame loop
+
+const prof = { sim: 0, sync: 0, submit: 0, frame: 0, gpu: 0 };
+let profHud = null;
+if (PROF) {
+  profHud = document.createElement('pre');
+  profHud.style.cssText = 'position:fixed;left:8px;top:8px;margin:0;padding:6px 8px;background:#000a;color:#9fd;font:11px/1.35 monospace;z-index:9;pointer-events:none';
+  document.body.appendChild(profHud);
+  const meshesIn = (root) => { let n = 0; root?.traverse((o) => { if (o.isMesh) n++; }); return n; };
+  setInterval(() => {
+    const i = renderer.info;
+    let fishMeshCount = 0;
+    for (const r of fishMeshes) fishMeshCount += meshesIn(r.mesh);
+    profHud.textContent =
+      `meshes fish ${fishMeshCount}  plants ${meshesIn(plantGroup)}  hardscape ${meshesIn(hardscapeGroup)}  shadow every ${SHADOW_EVERY}\n` +
+      `frame ${prof.frame.toFixed(2)} ms  (${(1000 / Math.max(prof.frame, 1e-3)).toFixed(0)} fps)\n` +
+      `cpu  sim ${prof.sim.toFixed(2)}  sync ${prof.sync.toFixed(2)}  submit ${prof.submit.toFixed(2)}\n` +
+      `gpu  render ${prof.gpu.toFixed(2)} ms\n` +
+      `draws ${i.render.drawCalls}  tris ${i.render.triangles}\n` +
+      `geometries ${i.memory.geometries}  textures ${i.memory.textures}`;
+  }, 500);
+}
+const ema = (prev, v) => prev + (v - prev) * 0.1;
+
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - last) / 1000);
+  if (PROF) prof.frame = ema(prof.frame, now - last);
+  last = now;
+  const t0 = PROF ? performance.now() : 0;
+
+  if (running) {
+    // Scheduled assays fire from simulation time, before the neural snapshot for this frame. A loom
+    // scheduled for t=10 therefore reaches the same update that sees world.time cross 10 s.
+    experimentRunner.update(world.time, {
+      dropFood: (ev) => dropFoodAt(ev),
+      neuralStimulus: (name, ev) => neuralController?.pulseStimulus(name, ev),
+      event: (ev) => telemetry.event('experiment-event', { t: world.time, detail: ev }),
+    });
+    // Dispatch the numeric virtual-world snapshot before decisions. The selected virtual fish
+    // reads only the latest completed drive synchronously; this frame never awaits the Worker.
+    neuralController?.update(world);
+    // Decide, then step, then render -- in that order, so a decision takes effect this frame.
+    for (const fish of world.fish) {
+      const worldDecisionDue = needsDecision(world, fish);
+      // The virtual neural controller may request ONE early reconsideration while a valid explore
+      // commitment is still protected. It uses its own configured feed threshold, so this loop does
+      // not duplicate that number or choose an intent itself.
+      const neuralFeedInterrupt = !worldDecisionDue && !!neuralController?.wantsFeedDecision?.(world, fish);
+      if (!worldDecisionDue && !neuralFeedInterrupt) continue;
+      telemetry.event('decision-opportunity', { t: world.time, fishId: fish.id, detail: {
+        reason: neuralFeedInterrupt ? 'neural-feed-interrupt' : 'world-decision-due',
+        intent: fish.intent?.activity ?? null,
+        target: fish.intent?.target ?? null,
+        commitRemainingSec: Math.max(0, Number(fish.commitRemaining) || 0),
+        intentAgeSec: Math.max(0, Number(fish.intentAge) || 0),
+        requestInFlight: !!fish.requestInFlight,
+      } });
+      // prepareDecision, never beginDecision: it moves a fish off an invalidated intent BEFORE the
+      // chooser runs. Redundant here because the policy answers synchronously -- and load-bearing
+      // the moment Plan 3 makes this a round trip. Wiring it now keeps that a transport swap.
+      prepareDecision(world, fish);
+      const intents = legalIntents(world, fish);
+      const chooser = neuralController?.controls(fish) ? neuralController : policy;
+      const chosen = chooser.choose(world, fish, intents);
+      if (!applyIntent(world, fish, chosen)) applyIntent(world, fish, baselineIntent(world, fish));
+      fish.requestInFlight = false;
+    }
+    stepWorld(world, dt);
+    // Runtime-only handoff. A stale/faulted controller returns null, so ordinary locomotion resumes
+    // immediately. No neural fields are serialized by stockRecords().
+    if (neuralController) {
+      for (const fish of world.fish) if (neuralController.controls(fish)) fish.neuralDrive = neuralController.driveFor(fish);
+    }
+    stepLocomotion(world, dt);
+    telemetry.observeFrame(world, { neuralController });
+  }
+
+  const t1 = PROF ? performance.now() : 0;
+  uClock.value = now / 1000;
+  syncFish(running ? dt : 0);
+  microfauna.update(running ? dt : 0);
+  syncFlakes();
+  if (RIPPLE_SETTINGS.enabled) syncBubbleRipplePops(uClock.value);
+  const ambientRipple = pollAmbientRipple(rippleAmbient, uClock.value, TANK);
+  if (ambientRipple) queueRipple(ambientRipple);
+  if (RIPPLE_SETTINGS.enabled) rippleSystem.step(dt, rippleQueue);
+  if (grass) grass.update(now / 1000);
+  controls.update();
+  const t2 = PROF ? performance.now() : 0;
+  const dueShadows = shadowsDue(shadowFrame++, SHADOW_EVERY, { sun: rig.dirLight.castShadow, lamp: lamp.castShadow });
+  if (dueShadows.sun) rig.dirLight.shadow.needsUpdate = true;
+  if (dueShadows.lamp) lamp.shadow.needsUpdate = true;
+  renderer.render(scene, camera);
+  if (PROF) {
+    const t3 = performance.now();
+    prof.sim = ema(prof.sim, t1 - t0);
+    prof.sync = ema(prof.sync, t2 - t1);
+    prof.submit = ema(prof.submit, t3 - t2);
+    renderer.resolveTimestampsAsync('render').then((ms) => { if (Number.isFinite(ms)) prof.gpu = ema(prof.gpu, ms); });
+  }
+});
+
+setInterval(updatePanel, 250);
+// Deliberate developer handles: controls now exist in the UI, but these make browser QA scripts
+// able to inspect the same objects without reaching into module-private variables.
+window.aquariumNeuralController = () => neuralController;
+window.aquariumTelemetry = telemetry;
+window.aquariumExperimentRunner = experimentRunner;
+</script>

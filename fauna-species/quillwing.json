@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "quillwing",
+  "type": "fish",
+  "seed": 30477,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.433,
+      "radiusProfile": [
+        0.204,
+        0.578,
+        0.316
+      ],
+      "taper": 1.21,
+      "flatten": "lateral"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "triangle",
+      "span": 0.1775,
+      "chord": 0.0463,
+      "sweep": 0.8,
+      "dihedral": 0.56,
+      "attach": 0.5,
+      "splitAngle": 0.37
+    },
+    "tail": {
+      "shape": "none",
+      "length": 0,
+      "spread": 0
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.37
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.21
+      },
+      "caudal": {
+        "enabled": true,
+        "size": 0.81
+      }
+    },
+    "head": {
+      "scale": 1.39,
+      "eyeDots": true,
+      "beakLength": 0.144
+    }
+  },
+  "color": {
+    "base": 4335921,
+    "accent": 6797976,
+    "pattern": "bands",
+    "patternCount": 4
+  },
+  "motion": {
+    "wingFreq": 0.88,
+    "wingAmplitude": 0.65,
+    "bodyWaveFreq": 2.9,
+    "bodyWaveAmp": 0.0281,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

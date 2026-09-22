@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "sparkwing",
+  "type": "fish",
+  "seed": 30979,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.277,
+      "radiusProfile": [
+        0.713,
+        0.53,
+        0.176
+      ],
+      "taper": 1.77,
+      "flatten": "lateral"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "oval",
+      "span": 0.1957,
+      "chord": 0.0338,
+      "sweep": 0.58,
+      "dihedral": -0.29,
+      "attach": 0.21,
+      "splitAngle": 0.73
+    },
+    "tail": {
+      "shape": "lance",
+      "length": 0.073,
+      "spread": 0.85
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.58
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 0.56,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 4674954,
+    "accent": 10255483,
+    "pattern": "none",
+    "patternCount": 10
+  },
+  "motion": {
+    "wingFreq": 0.74,
+    "wingAmplitude": 0.37,
+    "bodyWaveFreq": 2.56,
+    "bodyWaveAmp": 0.0172,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

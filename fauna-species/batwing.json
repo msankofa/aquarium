@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "batwing",
+  "type": "fish",
+  "seed": 149,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 0.22,
+      "radiusProfile": [
+        0.45,
+        0.85,
+        0.2
+      ],
+      "taper": 1,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "swept",
+      "span": 0.3,
+      "chord": 0.16,
+      "sweep": 0.5,
+      "dihedral": 0.25,
+      "attach": 0.5,
+      "splitAngle": 0.5
+    },
+    "tail": {
+      "shape": "lance",
+      "length": 0.22,
+      "spread": 0.15
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "pectoral": {
+        "enabled": false,
+        "size": 0.2
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 1.1,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 3351626,
+    "accent": 10190788,
+    "pattern": "bands",
+    "patternCount": 4
+  },
+  "motion": {
+    "wingFreq": 0.8,
+    "wingAmplitude": 0.5,
+    "bodyWaveFreq": 0.6,
+    "bodyWaveAmp": 0.015,
+    "bankFactor": 0.55,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 12,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}

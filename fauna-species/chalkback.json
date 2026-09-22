@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "chalkback",
+  "type": "fish",
+  "seed": 30966,
+  "geometry": {
+    "body": {
+      "segments": 5,
+      "length": 1.079,
+      "radiusProfile": [
+        0.608,
+        1.035,
+        0.215
+      ],
+      "taper": 1.47,
+      "flatten": "dorsal"
+    },
+    "wings": {
+      "count": 4,
+      "shape": "forked",
+      "span": 0.38,
+      "chord": 0.1078,
+      "sweep": 0.2,
+      "dihedral": -0.42,
+      "attach": 0.39,
+      "splitAngle": 1.08
+    },
+    "tail": {
+      "shape": "fork",
+      "length": 0.714,
+      "spread": 0.36
+    },
+    "fins": {
+      "dorsal": {
+        "enabled": true,
+        "size": 0.62
+      },
+      "pectoral": {
+        "enabled": true,
+        "size": 0.45
+      },
+      "caudal": {
+        "enabled": false,
+        "size": 0.2
+      }
+    },
+    "head": {
+      "scale": 0.51,
+      "eyeDots": true,
+      "beakLength": 0
+    }
+  },
+  "color": {
+    "base": 6385444,
+    "accent": 10997401,
+    "pattern": "bands",
+    "patternCount": 9
+  },
+  "motion": {
+    "wingFreq": 1.79,
+    "wingAmplitude": 0.34,
+    "bodyWaveFreq": 0.72,
+    "bodyWaveAmp": 0.0517,
+    "bankFactor": 0.5,
+    "flutterNoise": 0.2,
+    "pathFreq": 0.4,
+    "pathJitter": 0.12,
+    "pathBreathe": 0.7,
+    "headingScatter": 0
+  },
+  "flock": {
+    "memberCount": 16,
+    "orbitRadii": [
+      0.8,
+      0.4,
+      0.8
+    ],
+    "speed": 0.45,
+    "turnRate": 1.6,
+    "maxBank": 0.5
+  },
+  "habitat": {
+    "clearance": 0.6,
+    "bandLow": 0.8,
+    "bandHigh": 6,
+    "homeSizeMax": 30
+  }
+}
