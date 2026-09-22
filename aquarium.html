@@ -789,7 +789,10 @@ let last = performance.now();
 // a page opened without `python serve.py` can still read; it is never the truth.
 const STOCK_FILE = 'aquarium-stock.json';
 const store = createDiskStore({
-  read: '/' + STOCK_FILE, write: '/api/save-aquarium',
+  // RELATIVE, not '/' + STOCK_FILE: an absolute path resolves to the SITE root, which is the
+  // repo root only when the page is served from it. Under GitHub Pages the page lives at
+  // /<repo>/ and the absolute form 404s, so the tank silently regenerated from defaults.
+  read: STOCK_FILE, write: '/api/save-aquarium',
   storage: localStorage, key: 'pcw:aquariumStock', debounceMs: 700,
 });
 await store.load();
