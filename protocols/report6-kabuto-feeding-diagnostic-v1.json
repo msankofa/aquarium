@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "report6-kabuto-feeding-diagnostic-v1",
+  "name": "Report 6 - Kabuto feeding diagnostic v1",
+  "createdAt": "2026-09-22T00:30:00.000Z",
+  "steps": [
+    {
+      "id": "kabuto-feeding-diagnostic",
+      "scenario": "food-loom",
+      "durationSec": 20,
+      "settleSec": 8,
+      "replicates": 4,
+      "baseSeed": 31001,
+      "fish1Species": "140_kabuto",
+      "foodTargetTriggerMode": "loom",
+      "foodTargetLoomDelaySec": 0.5
+    }
+  ]
+}

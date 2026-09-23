@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "report6-sham-feeding-control-v1",
+  "name": "Report 6 - Sham feeding control v1",
+  "createdAt": "2026-09-21T21:46:00.000Z",
+  "steps": [
+    {
+      "id": "sham-goldeen",
+      "scenario": "food-loom",
+      "durationSec": 20,
+      "settleSec": 8,
+      "replicates": 4,
+      "baseSeed": 31001,
+      "fish1Species": "118_goldeen",
+      "foodTargetTriggerMode": "sham",
+      "foodTargetLoomDelaySec": 0.5
+    },
+    {
+      "id": "sham-tentacool",
+      "scenario": "food-loom",
+      "durationSec": 20,
+      "settleSec": 8,
+      "replicates": 4,
+      "baseSeed": 31001,
+      "fish1Species": "072_tentacool",
+      "foodTargetTriggerMode": "sham",
+      "foodTargetLoomDelaySec": 0.5
+    }
+  ]
+}

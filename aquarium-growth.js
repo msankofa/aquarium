@@ -233,7 +233,8 @@ function collectTriangles(surfaces) {
  * page to widen against the view; `along` is 0 at the root to 1 at the tip.
  */
 export function buildAlgaeArrays({ surfaces, seed = 1, amount = ALGAE.default, bounds }) {
-  const out = { positions: [], normals: [], tangents: [], sides: [], along: [], sway: [], colors: [], indices: [], strands: 0 };
+  // `tufts` is where each tuft grows (base point, surface normal): what aquarium-microfauna.js clusters into habitats.
+  const out = { positions: [], normals: [], tangents: [], sides: [], along: [], sway: [], colors: [], indices: [], strands: 0, tufts: [] };
   const { tris, area } = collectTriangles(surfaces || []);
   // The amount scales the tuft count up to the cap, so the slider still means something on a tank with a lot of stone.
   const want = Math.round(Math.max(0, Math.min(1, amount)) * Math.min(ALGAE.tuftCap, area * ALGAE.tuftsPerM2));
@@ -269,6 +270,7 @@ export function buildAlgaeArrays({ surfaces, seed = 1, amount = ALGAE.default, b
     if (rng() > chance * 2.4) continue;
     made++;
     const rootNormal = t.n;
+    out.tufts.push({ p: clampP(p), n: [...t.n] });
     const lenBase = ALGAE.length * (0.55 + 0.9 * patch) * (0.7 + 0.6 * up);
     const lean = norm(add(add(mul(t.n, 0.75), mul(CURRENT, 0.55)), [(rng() - 0.5) * 0.9, 0.05 + (rng() - 0.5) * 0.4, (rng() - 0.5) * 0.9]));
     const count = ALGAE.strandsPerTuft[0] + Math.floor(rng() * (ALGAE.strandsPerTuft[1] - ALGAE.strandsPerTuft[0] + 1));

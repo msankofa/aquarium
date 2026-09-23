@@ -10,6 +10,11 @@
 // wherever aquarium-growth.js actually put the duckweed and seats a leader on each cluster, inside
 // the thin layer the fronds and their roots occupy -- no travel, no landing, no terrain sampling.
 //
+// A species lives in any of four habitats (MICROFAUNA_HABITATS): under the duckweed, inside the
+// caves, on the logs, among the hair algae. Each habitat kind is an ANCHOR surface and a direction --
+// the fronds hang down, everything else grows up off a floor or a surface -- and the cloud is
+// weighted toward that surface the same way whichever it is (tierLayout).
+//
 // A tank holds a LIST of species, each drawn with one of two models (MICROFAUNA_MODELS) and each
 // with its own size, speed, count per cloud, likelihood and draw distance. Only a change of size or
 // model rebuilds a species -- both are baked into its geometry. Speed is a uniform plus the leader's
@@ -23,6 +28,7 @@ import { mergeFaunaOpts, presetOpts, buildCreatureGeometry } from './fauna.js';
 import { createFlockSim } from './fauna-flock.js';
 import { createFaunaRenderer } from './fauna-gpu.js';
 import { mulberry32 } from './aquarium-world.js';
+import { solidShape } from './aquarium-obstacles.js';
 
 /**
  * The habitat: a duckweed patch's own footprint, from just under the surface down through the
@@ -32,13 +38,30 @@ export const MICROFAUNA = Object.freeze({
   maxHabitats: 16,          // duckweed patches that get a leader, per species
   minFrondsPerCluster: 3,   // an isolated stray frond does not get its own cloud
   clusterCell: 0.09,        // m, grid bucket size for grouping duckweed fronds into patches
-  phyllosphereDepth: 0.045, // m, from the top of the layer down into the roots
   surfaceClearance: 0.003,  // m, the layer's top sits this far under the water line
   homeMin: 0.035,           // m, half-extent floor so a tight patch still has orbit room
   homeMax: 0.1,             // m, half-extent cap: the patch's own spread, not beyond it
   maxSpecies: 8,            // each species is one compute pass and one draw
   tiers: 4,                 // nested layers per cloud; see tierLayout
+  caveFill: 0.42,           // across a cave's tube, the share of its radius a cloud may take (0.42^2 + 0.9^2 < 1: its floor corners stay in the tube)
+  caveAlong: 0.85,          // along the tube, the share of its half-length
+  caveCeiling: 0.6,         // a cave cloud's top, above the tube's axis, in radii (the tube is still wider there)
+  woodSegment: 1.5,         // a log's clouds, one per this many log diameters along it
+  woodFill: 0.8,            // a log cloud's footprint, in log radii
+  algaeCell: 0.06,          // m, grid bucket (x, y and z) for grouping algae tufts
+  minTuftsPerCluster: 2,
+  algaeMin: 0.015,          // m, algae cloud half-extent floor
+  algaeMax: 0.06,           // m, and cap
 });
+
+/** Where a species can live. Keys are what a species record stores. */
+export const MICROFAUNA_HABITATS = Object.freeze({
+  duckweed: Object.freeze({ label: 'Duckweed' }),
+  caves: Object.freeze({ label: 'Caves' }),
+  logs: Object.freeze({ label: 'Logs' }),
+  algae: Object.freeze({ label: 'Hair algae' }),
+});
+export const MICROFAUNA_HABITAT_KEYS = Object.freeze(Object.keys(MICROFAUNA_HABITATS));
 
 /** Controls every species has, and their ranges. Size is body length in mm; distance is metres. */
 export const MICROFAUNA_CONTROLS = Object.freeze({
@@ -71,7 +94,7 @@ const NUMERIC = Object.keys(MICROFAUNA_CONTROLS);
 export function newSpecies(settings, model = 'zooplankton', name = null) {
   const m = MICROFAUNA_MODELS[model] ? model : 'zooplankton';
   const id = settings.nextId;
-  return { id, name: name || `Species ${id + 1}`, model: m, ...MICROFAUNA_MODELS[m].defaults };
+  return { id, name: name || `Species ${id + 1}`, model: m, ...MICROFAUNA_MODELS[m].defaults, habitats: ['duckweed'] };
 }
 
 function resolveSpecies(v, fallbackId) {
@@ -85,6 +108,10 @@ function resolveSpecies(v, fallbackId) {
     rec[c] = Math.max(r.min, Math.min(r.max, Number.isFinite(v[c]) ? v[c] : d[c]));
   }
   rec.count = Math.round(rec.count);
+  // Absent is duckweed, the only habitat there was. Present but empty is a choice and is kept.
+  rec.habitats = Array.isArray(v.habitats)
+    ? MICROFAUNA_HABITAT_KEYS.filter(k => v.habitats.includes(k))
+    : ['duckweed'];
   return rec;
 }
 
@@ -121,59 +148,150 @@ export function resolveMicrofauna(saved, legacy) {
 }
 
 /**
- * Cluster duckweed frond positions into habitats. Pure: no THREE.
- *
- * Grid-buckets fronds by (x, z), keeps buckets with at least `minFrondsPerCluster` fronds, most
- * populous first, capped at `maxHabitats`. A habitat is the patch's own footprint -- its measured
- * spread, bounded, never a margin beyond it -- and the thin layer from just under the surface
- * down into the roots, clamped inside the glass.
+ * A habitat record: `center` and `half` are its footprint in x-z, `anchorY` the surface the cloud
+ * clings to, `dir` which way the cloud grows from it (-1 down, +1 up), and `reach` the most it may
+ * grow before it would leave the water or the cave. `kind` is a MICROFAUNA_HABITATS key.
  */
-export function microfaunaHabitats({ seed = 1, tank, floaters = [], waterLevel }) {
-  if (!floaters.length || !Number.isFinite(waterLevel)) return [];
+function habitat(kind, id, seed, cx, cz, hx, hz, anchorY, dir, reach, tank, extra = {}) {
+  // Clamped inside the tank: the erosion rule only knows the box it is handed, not the glass.
+  const x = tank ? Math.max(tank.min[0] + hx, Math.min(tank.max[0] - hx, cx)) : cx;
+  const z = tank ? Math.max(tank.min[2] + hz, Math.min(tank.max[2] - hz, cz)) : cz;
+  return { habitatId: `${kind}-${id}`, habitatSeed: seed, kind, center: [x, z], half: [hx, hz], anchorY, dir, reach, ...extra };
+}
 
-  const cell = MICROFAUNA.clusterCell;
+/** Grid-bucket points by `key`, keep buckets of at least `min`, most populous first, capped. */
+function cluster(points, key, min, cap) {
   const buckets = new Map();
-  for (const f of floaters) {
-    const key = `${Math.floor(f.x / cell)},${Math.floor(f.z / cell)}`;
-    let b = buckets.get(key);
-    if (!b) { b = []; buckets.set(key, b); }
+  for (const f of points) {
+    const k = key(f);
+    let b = buckets.get(k);
+    if (!b) { b = []; buckets.set(k, b); }
     b.push(f);
   }
-
-  const clusters = [];
-  for (const fronds of buckets.values()) {
-    if (fronds.length < MICROFAUNA.minFrondsPerCluster) continue;
-    let x = 0, z = 0;
-    for (const f of fronds) { x += f.x; z += f.z; }
-    x /= fronds.length; z /= fronds.length;
+  const out = [];
+  for (const pts of buckets.values()) {
+    if (pts.length < min) continue;
+    let x = 0, y = 0, z = 0;
+    for (const f of pts) { x += f.x; y += f.y ?? 0; z += f.z; }
+    x /= pts.length; y /= pts.length; z /= pts.length;
     let spread = 0;
-    for (const f of fronds) spread = Math.max(spread, Math.hypot(f.x - x, f.z - z));
-    clusters.push({ x, z, n: fronds.length, spread });
+    for (const f of pts) spread = Math.max(spread, Math.hypot(f.x - x, f.z - z));
+    out.push({ x, y, z, n: pts.length, spread });
   }
-  clusters.sort((a, b) => b.n - a.n);
-  const kept = clusters.slice(0, MICROFAUNA.maxHabitats);
-  if (!kept.length) return [];
+  return out.sort((a, b) => b.n - a.n).slice(0, cap);
+}
 
+/**
+ * Under the duckweed. Fronds are grid-bucketed by (x, z); a patch's footprint is its measured
+ * spread, bounded, never a margin beyond it, and the cloud hangs from just under the water line.
+ */
+export function duckweedHabitats({ seed = 1, tank, floaters = [], waterLevel }) {
+  if (!floaters.length || !Number.isFinite(waterLevel)) return [];
+  const cell = MICROFAUNA.clusterCell;
+  const kept = cluster(floaters, f => `${Math.floor(f.x / cell)},${Math.floor(f.z / cell)}`, MICROFAUNA.minFrondsPerCluster, MICROFAUNA.maxHabitats);
   const rng = mulberry32((seed ^ 0x6d2f1a3b) >>> 0);
   const top = waterLevel - MICROFAUNA.surfaceClearance;
-  const bottom = top - MICROFAUNA.phyllosphereDepth;
-  const centerY = (top + bottom) / 2, halfY = (top - bottom) / 2;
-
+  const floor = tank ? tank.min[1] + 0.01 : -Infinity;
   return kept.map((c, i) => {
-    const halfXZ = Math.max(MICROFAUNA.homeMin, Math.min(MICROFAUNA.homeMax, c.spread));
-    // Clamped inside the tank: the erosion rule only knows the box it is handed, not the glass.
-    const cx = tank ? Math.max(tank.min[0] + halfXZ, Math.min(tank.max[0] - halfXZ, c.x)) : c.x;
-    const cz = tank ? Math.max(tank.min[2] + halfXZ, Math.min(tank.max[2] - halfXZ, c.z)) : c.z;
-    return {
-      habitatId: `duckweed-${i}`, habitatSeed: Math.floor(rng() * 0xffffffff) >>> 0, fronds: c.n,
-      home: { center: [cx, centerY, cz], half: [halfXZ, halfY, halfXZ] },
-    };
+    const h = Math.max(MICROFAUNA.homeMin, Math.min(MICROFAUNA.homeMax, c.spread));
+    return habitat('duckweed', i, Math.floor(rng() * 0xffffffff) >>> 0, c.x, c.z, h, h, top, -1, top - floor, tank, { fronds: c.n });
   });
+}
+
+/**
+ * Inside the caves. A cave is an open tube (aquarium-obstacles.js solidShape, the shape the page
+ * draws and the fish collide with); its cloud stands on the floor inside it -- the sand, or the
+ * tube's own bottom where that is higher -- and rises no further than `caveCeiling` radii above
+ * the axis, where the tube is still wider than the cloud.
+ */
+export function caveHabitats({ seed = 1, tank, hardscape = [], heightAt, waterLevel }) {
+  const out = [];
+  if (!Number.isFinite(waterLevel)) return out;
+  const rng = mulberry32((seed ^ 0x3c6ef372) >>> 0);
+  for (const h of hardscape) {
+    if (h.kind !== 'cave') continue;
+    const sh = solidShape(h);
+    const R = sh.radius;
+    const along = sh.halfLength * MICROFAUNA.caveAlong, across = R * MICROFAUNA.caveFill;
+    const alongX = Math.abs(sh.axis[0]) > Math.abs(sh.axis[2]);
+    const [cx, cy, cz] = sh.centre;
+    const ground = heightAt ? heightAt(cx, cz) : -Infinity;
+    const floor = Math.max(ground, cy - R * 0.9) + 0.002;
+    const ceiling = Math.min(cy + R * MICROFAUNA.caveCeiling, waterLevel - MICROFAUNA.surfaceClearance);
+    const seedHere = Math.floor(rng() * 0xffffffff) >>> 0;
+    if (ceiling - floor < 0.004) continue;
+    out.push(habitat('caves', h.id, seedHere, cx, cz, alongX ? along : across, alongX ? across : along, floor, 1, ceiling - floor, tank));
+  }
+  return out;
+}
+
+/**
+ * On the logs. A log is a tilted, turned capsule, which no one axis-aligned box can follow, so each
+ * log gets a row of small clouds along its length, each standing on the top of the bark above its
+ * own point on the axis (the axis height plus the radius, stretched by the tilt).
+ */
+export function logHabitats({ seed = 1, tank, hardscape = [], waterLevel }) {
+  const out = [];
+  if (!Number.isFinite(waterLevel)) return out;
+  const rng = mulberry32((seed ^ 0x7f4a7c15) >>> 0);
+  const top = waterLevel - MICROFAUNA.surfaceClearance;
+  for (const h of hardscape) {
+    if (h.kind !== 'wood') continue;
+    const sh = solidShape(h);
+    const R = sh.radius, a = sh.axis;
+    const horiz = Math.max(0.2, Math.sqrt(Math.max(0, 1 - a[1] * a[1])));
+    const n = Math.max(1, Math.round((2 * sh.halfLength) / (2 * R * MICROFAUNA.woodSegment)));
+    const f = R * MICROFAUNA.woodFill;
+    // Bark above the axis, plus how far the log climbs across the cloud's footprint: a flat box on a
+    // sloping log would otherwise sink its uphill edge into the bark.
+    const lift = R / horiz + f * Math.SQRT2 * Math.abs(a[1]) / horiz;
+    for (let i = 0; i < n; i++) {
+      const t = (((i + 0.5) / n) * 2 - 1) * sh.halfLength * 0.85;
+      const p = [sh.centre[0] + a[0] * t, sh.centre[1] + a[1] * t, sh.centre[2] + a[2] * t];
+      const anchor = p[1] + lift + 0.001;
+      const seedHere = Math.floor(rng() * 0xffffffff) >>> 0;
+      if (top - anchor < 0.004) continue;
+      out.push(habitat('logs', `${h.id}-${i}`, seedHere, p[0], p[2], f, f, anchor, 1, top - anchor, tank));
+    }
+  }
+  return out;
+}
+
+/**
+ * Among the hair algae. Tufts (buildAlgaeArrays' `tufts`, where each one grows) are bucketed in 3D
+ * so a tuft on a rock's top and one on its flank do not average into a point in mid-water; a
+ * cluster's cloud stands on the mean height of its tufts' bases.
+ */
+export function algaeHabitats({ seed = 1, tank, tufts = [], waterLevel }) {
+  if (!tufts.length || !Number.isFinite(waterLevel)) return [];
+  const cell = MICROFAUNA.algaeCell;
+  const pts = tufts.map(t => ({ x: t.p[0], y: t.p[1], z: t.p[2] }));
+  const kept = cluster(pts, f => `${Math.floor(f.x / cell)},${Math.floor(f.y / cell)},${Math.floor(f.z / cell)}`, MICROFAUNA.minTuftsPerCluster, MICROFAUNA.maxHabitats);
+  const rng = mulberry32((seed ^ 0x1b873593) >>> 0);
+  const top = waterLevel - MICROFAUNA.surfaceClearance;
+  const out = [];
+  kept.forEach((c, i) => {
+    const h = Math.max(MICROFAUNA.algaeMin, Math.min(MICROFAUNA.algaeMax, c.spread));
+    const seedHere = Math.floor(rng() * 0xffffffff) >>> 0;
+    if (top - c.y < 0.004) return;
+    out.push(habitat('algae', i, seedHere, c.x, c.z, h, h, c.y, 1, top - c.y, tank, { tufts: c.n }));
+  });
+  return out;
+}
+
+/** Every habitat in the tank, of every kind. Pure: no THREE. */
+export function microfaunaHabitats(world) {
+  return [...duckweedHabitats(world), ...caveHabitats(world), ...logHabitats(world), ...algaeHabitats(world)];
 }
 
 /** A patch's stable 0..1 draw for one species, keyed on the species id rather than its position in the list. */
 export function patchRoll(habitat, speciesId) {
   return mulberry32((habitat.habitatSeed ^ Math.imul(speciesId + 1, 0x9e3779b1)) >>> 0)();
+}
+
+/** The habitats a species lives in, of those in the tank. */
+export function speciesHabitats(habitats, rec) {
+  return habitats.filter(h => rec.habitats.includes(h.kind));
 }
 
 /** Members a leader draws: the species count if this patch's roll clears the likelihood, else none. */
@@ -216,30 +334,31 @@ export function speciesOpts(model, sizeMm) {
 }
 
 /**
- * One patch's cloud, as `MICROFAUNA.tiers` nested boxes that all hang from the same top, just
- * under the water line: the first is a thin slab against the fronds, each next one reaches further
- * down, and the last reaches the species' full depth. Each gets an equal share of the members, so
+ * One habitat's cloud, as `MICROFAUNA.tiers` nested boxes that all start at the habitat's anchor
+ * surface (just under the water line for duckweed, the floor or the bark for the rest): the first
+ * is a thin slab against that surface, each next one reaches further from it, and the last reaches
+ * the species' full depth or as far as the habitat allows. Each gets an equal share of the members, so
  * the members crowd against the fronds and thin out with depth, with no gap between layers --
  * the "weighted to the top" a stateless orbit cannot give on its own (a member's height is a sine
  * about its leader, symmetric by construction).
  *
- * `spread` is the share of the patch's footprint the cloud covers and `depth` how far down it
- * reaches, in metres. Each orbit is sized to fill its box short of the erosion rule's own margin
+ * `spread` is the share of the habitat's footprint the cloud covers and `depth` how far from the
+ * anchor it reaches, in metres. Each orbit is sized to fill its box short of the erosion rule's own margin
  * (`orbit + animatedRadius < half` on every axis), so the leader has a sliver of room and every box
  * is one fauna-flock.js accepts; a box too thin for the body is widened to the least it can hold.
  */
-export function tierLayout(habitat, rec, animatedRadius, waterLevel) {
+export function tierLayout(habitat, rec, animatedRadius) {
   const n = MICROFAUNA.tiers;
-  const top = waterLevel - MICROFAUNA.surfaceClearance;
   const ar = animatedRadius;
   const fill = (half) => Math.max(0, (half - ar) * 0.98);
-  const [hx, , hz] = habitat.home.half;
+  const [hx, hz] = habitat.half;
+  const reach = Math.min(rec.depth, habitat.reach);
   const on = patchRoll(habitat, rec.id) < rec.chance;
   const base = Math.floor(rec.count / n), extra = rec.count % n;
   const out = [];
   for (let k = 0; k < n; k++) {
-    const halfY = Math.max(rec.depth * (k + 1) / n, 2.1 * ar) / 2;
-    const home = { center: [habitat.home.center[0], top - halfY, habitat.home.center[2]], half: [hx, halfY, hz] };
+    const halfY = Math.max(reach * (k + 1) / n, 2.1 * ar) / 2;
+    const home = { center: [habitat.center[0], habitat.anchorY + habitat.dir * halfY, habitat.center[1]], half: [hx, halfY, hz] };
     const tierSeed = mulberry32((habitat.habitatSeed ^ Math.imul(k + 1, 0x85ebca6b)) >>> 0)();
     out.push({
       habitatId: `${habitat.habitatId}-t${k}`,
@@ -252,8 +371,8 @@ export function tierLayout(habitat, rec, animatedRadius, waterLevel) {
   return out;
 }
 
-/** One species: a flock sim and its GPU renderer, one leader per layer per patch. */
-function buildPopulation({ renderer, scene, camera, rec, worldSeed, habitats, waterLevel }) {
+/** One species: a flock sim and its GPU renderer, one leader per layer per habitat it lives in. */
+function buildPopulation({ renderer, scene, camera, rec, worldSeed, habitats }) {
   const opts = speciesOpts(rec.model, rec.size);
   const geo = buildCreatureGeometry(opts);
   const animatedRadius = geo.userData.fauna.animatedRadius;
@@ -269,7 +388,7 @@ function buildPopulation({ renderer, scene, camera, rec, worldSeed, habitats, wa
   const sim = createFlockSim({ capacity, worldSeed: worldSeed >>> 0 });
   const slots = [];
   for (const h of habitats) {
-    tierLayout(h, rec, animatedRadius, waterLevel).forEach((t, k) => {
+    tierLayout(h, rec, animatedRadius).forEach((t, k) => {
       const r = sim.addLeader({
         habitatId: t.habitatId, habitatSeed: t.habitatSeed, home: t.home,
         params: {
@@ -281,7 +400,7 @@ function buildPopulation({ renderer, scene, camera, rec, worldSeed, habitats, wa
       slots.push({ slot: r.slot, habitat: h, tier: k });
     });
   }
-  const pop = { id: rec.id, model: rec.model, size: rec.size, sim, gpu, slots, opts, animatedRadius, waterLevel };
+  const pop = { id: rec.id, model: rec.model, size: rec.size, kinds: rec.habitats.join(), sim, gpu, slots, opts, animatedRadius };
   applyLive(pop, rec);
   return pop;
 }
@@ -293,7 +412,7 @@ function applyLive(pop, rec) {
   pop.gpu.setCullDistance(rec.drawDistance);
   const layouts = new Map();
   for (const { slot, habitat, tier } of pop.slots) {
-    if (!layouts.has(habitat)) layouts.set(habitat, tierLayout(habitat, rec, pop.animatedRadius, pop.waterLevel));
+    if (!layouts.has(habitat)) layouts.set(habitat, tierLayout(habitat, rec, pop.animatedRadius));
     const t = layouts.get(habitat)[tier];
     const r = pop.sim.updateLeader(slot, {
       home: t.home,
@@ -310,19 +429,20 @@ function disposePopulation(pop) {
 }
 
 /**
- * The aquarium adapter. `rebuild` seats fresh habitats (from the page's build(), after
- * scape.floaters exists); `apply` takes new settings -- a species that appeared, vanished, or
- * changed size or model is rebuilt, every other change is live; `update` steps the sims once a frame.
+ * The aquarium adapter. `rebuild` seats fresh habitats (from the page's build(), after the growth
+ * exists); `apply` takes new settings -- a species that appeared, vanished, or changed size, model
+ * or habitats is rebuilt, every other change is live; `update` steps the sims once a frame.
  */
 export function createMicrofauna({ renderer, scene, camera }) {
   const pops = new Map();   // species id -> population
-  let habitats = [], seed = 1, waterLevel = 0, disposed = false;
+  let habitats = [], seed = 1, disposed = false;
 
   function seat(rec) {
     disposePopulation(pops.get(rec.id));
     pops.delete(rec.id);
-    if (!habitats.length) return;
-    pops.set(rec.id, buildPopulation({ renderer, scene, camera, rec, habitats, waterLevel, worldSeed: (seed + rec.id) >>> 0 }));
+    const mine = speciesHabitats(habitats, rec);
+    if (!mine.length) return;
+    pops.set(rec.id, buildPopulation({ renderer, scene, camera, rec, habitats: mine, worldSeed: (seed + rec.id) >>> 0 }));
   }
 
   function apply(settings) {
@@ -332,18 +452,18 @@ export function createMicrofauna({ renderer, scene, camera }) {
     for (const [id, pop] of pops) if (!keep.has(id)) { disposePopulation(pop); pops.delete(id); }
     for (const rec of all.species) {
       const pop = pops.get(rec.id);
-      if (!pop || pop.size !== rec.size || pop.model !== rec.model) seat(rec);
+      if (!pop || pop.size !== rec.size || pop.model !== rec.model || pop.kinds !== rec.habitats.join()) seat(rec);
       else applyLive(pop, rec);
     }
   }
 
-  function rebuild({ seed: s = 1, tank, floaters = [], waterLevel: w, settings }) {
+  /** `hardscape` is the scape's records (caves, logs), `tufts` the algae's; either may be empty. */
+  function rebuild({ seed: s = 1, tank, floaters = [], hardscape = [], heightAt = null, tufts = [], waterLevel, settings }) {
     if (disposed) return;
     for (const pop of pops.values()) disposePopulation(pop);
     pops.clear();
     seed = s;
-    waterLevel = w;
-    habitats = microfaunaHabitats({ seed, tank, floaters, waterLevel });
+    habitats = microfaunaHabitats({ seed, tank, floaters, hardscape, heightAt, tufts, waterLevel });
     apply(settings);
   }
 
@@ -358,7 +478,8 @@ export function createMicrofauna({ renderer, scene, camera }) {
   }
 
   function diagnostics() {
-    const out = { habitats: habitats.length, species: {} };
+    const out = { habitats: {}, species: {} };
+    for (const h of habitats) out.habitats[h.kind] = (out.habitats[h.kind] || 0) + 1;
     for (const [id, pop] of pops) out.species[id] = pop.sim.snapshot().leaders.reduce((n, L) => n + L.memberCount, 0);
     return out;
   }

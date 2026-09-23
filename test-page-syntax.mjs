@@ -15,7 +15,7 @@
 //
 // node test-page-syntax.mjs [page.html ...]
 
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -305,6 +305,7 @@ function rebuildsWhileDragging(src, expensive) {
 
 const dir = mkdtempSync(join(tmpdir(), 'page-syntax-'));
 for (const page of PAGES) {
+  if (!existsSync(page)) { console.log(`skip ${page} (not in this checkout)`); continue; }   // the standalone aquarium ships only its own page
   const html = readFileSync(page, 'utf8');
   const scripts = [...html.matchAll(/<script\s+type="module"[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]).filter(s => s.trim());
   check(`${page} has a module script`, scripts.length > 0);

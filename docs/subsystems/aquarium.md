@@ -2300,10 +2300,34 @@ habitat is the layer the fronds and roots occupy: its top 3 mm under the water l
 used a box 16 cm deep starting 1 cm down, 0.07-0.22 m across, which put the clouds under the
 duckweed rather than in it.
 
+**Four habitat kinds.** A species lives in any combination of duckweed, caves, logs and hair
+algae (the **Lives in** checkboxes; `habitats` on the species record, absent meaning duckweed). Each
+kind is an anchor surface, a direction the cloud grows from it, and how far it may reach
+(`duckweedHabitats`, `caveHabitats`, `logHabitats`, `algaeHabitats`, all pure):
+
+| kind | anchor | grows | footprint | limit |
+|---|---|---|---|---|
+| duckweed | 3 mm under the water line | down | the patch's own frond spread | the tank floor |
+| caves | the floor inside the tube: the sand, or the tube's bottom where higher | up | 0.42 radii across the tube, 0.85 of its length | 0.6 radii above the axis, where the tube is still wider than the cloud |
+| logs | the top of the bark, one cloud per 1.5 log diameters along it | up | 0.8 log radii | the water line |
+| algae | the mean height of a cluster of tuft bases | up | the cluster's spread, 1.5-6 cm | the water line |
+
+Caves and logs come from `aquarium-obstacles.js`'s `solidShape`, the shape the page draws and the
+fish collide with, so a cloud cannot disagree with the solid it lives in. A log is a tilted, turned
+capsule no single axis-aligned box can follow, hence a row of clouds; each is lifted by how far the
+log climbs across its footprint, or its uphill edge would sit in the bark. The cave fill is 0.42
+rather than a round half because 0.42^2 + 0.9^2 < 1 keeps a cloud's floor corners inside the tube.
+Algae tufts come from `buildAlgaeArrays`' new `tufts` output (base point and surface normal per tuft;
+recorded only, the algae itself unchanged), bucketed in 3D so a tuft on a rock's top and one on its
+flank are not averaged into a point in mid-water. The tests seat these on the saved tank's own
+hardscape (4 caves, 8 rocks, 4 logs, 400 fronds): over 10 seeds, 160 duckweed, 40 cave, 110 log and
+119 algae habitats, every layer box inside its cave, clear of its log and under the water. A species
+living everywhere is about 45 habitats, 180 leaders; changing where it lives rebuilds that species.
+
 **Weighted to the top: four nested layers.** A member's height is a sine about its leader, so one
 leader's cloud is symmetric about its centre and cannot be denser near the fronds. `tierLayout()`
-therefore gives each patch four leaders per species whose boxes all hang from the same top, 3 mm
-under the water line: the first reaches a quarter of the species' depth, the next half, and so on,
+therefore gives each habitat four leaders per species whose boxes all start at its anchor (for
+duckweed, 3 mm under the water line): the first reaches a quarter of the species' depth, the next half, and so on,
 the last the full depth. Each takes an equal share of the members, so every layer contributes to the
 top of the cloud and only the deeper ones to its bottom. Measured on a 4 cm cloud: 79% of members in
 its top half, mean depth 12.5 mm. Each layer's orbit fills its box short of the erosion rule's own
@@ -2332,12 +2356,13 @@ as its own `microfauna` record in the stock file, `{ species: [...], nextId }`:
 | control | range | new zooplankton / phytoplankton | how it applies |
 |---|---|---|---|
 | Model | zooplankton, phytoplankton | -- | rebuilds that species |
+| Lives in | duckweed, caves, logs, hair algae, any combination | duckweed | rebuilds that species |
 | Size (body length) | 0.02-6 mm, logarithmic slider | 1.2 / 0.5 mm | baked into the geometry, so it rebuilds that species on release |
 | Speed | 0-3× | 1× | the orbit and body-wave rates (`setMotion`) and the leader's cruise speed, live |
 | Per cloud | 0-2000 | 40 / 80 | split across the four layers as each leader's live `memberCount` (stride 500 per layer) |
 | Likelihood | 0-100% | 70 / 80% | a leader draws nothing unless its patch's roll for this species is under it, live |
 | Spread | 5-100% | 60% | share of the patch's footprint the cloud covers: the layers' horizontal orbits, live |
-| Depth | 2-100 mm | 30 mm | how far down the deepest layer reaches: the layers' boxes and vertical orbits, live |
+| Depth | 2-100 mm | 30 mm | how far the deepest layer reaches from the anchor, capped by the habitat: the layers' boxes and vertical orbits, live |
 | Draw distance | 0.05-5 m | 2 m | `setCullDistance`, live. Tiny members twinkle once they fall under a pixel; this cuts them off before the twinkle stops reading as real |
 
 A patch's roll comes from the habitat seed and the species **id**, not its position in the list,

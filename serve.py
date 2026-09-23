@@ -526,6 +526,31 @@ def append_render_tasks_notify(body_bytes):
     return 'research/stats/render-tasks-notify.log'
 
 
+def append_self_portrait_made(body_bytes):
+    # demos/self-portrait.html: one line per thing the figure makes, appended, so the next load
+    # can lay it on the path as a stone. Fields are whitelisted and clipped; nothing else is kept.
+    body = json.loads(body_bytes.decode('utf-8'))
+    if not isinstance(body, dict):
+        raise ValueError('expected a JSON object')
+    effects = {'made', 'lit', 'doused', 'melted', 'struck'}
+    effect = str(body.get('effect', 'made'))
+    if effect not in effects:
+        raise ValueError('unknown effect')
+    line = {
+        'date': str(body.get('date', ''))[:20],
+        'what': str(body.get('what', ''))[:40],
+        'asked': str(body.get('asked', '')).replace(chr(10), ' ')[:120],
+        'effect': effect,
+    }
+    if not line['date'] or not line['what']:
+        raise ValueError('date and what are required')
+    target = os.path.join(ROOT, 'scratchpads', 'self-portrait', 'made.jsonl')
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(line, ensure_ascii=False) + chr(10))
+    return 'scratchpads/self-portrait/made.jsonl'
+
+
 def save_scratchpad_capture(body_bytes):
     # viewer.html in scratchpads/sablynx-ugv posts its view snapshots and GLB exports here, so the
     # scratchpad needs no server of its own. `dir` picks shots/ or export/, both under that folder.
@@ -1192,6 +1217,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if self.path.startswith('/api/render-tasks-notify'):
             self._handle_simple_save(append_render_tasks_notify, 10_000, allow_empty=True)
+        if self.path.startswith('/api/self-portrait-made'):
+            self._handle_simple_save(append_self_portrait_made, 4_000)
             return
         if self.path == '/api/jev':
             self._handle_jev_proxy()

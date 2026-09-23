@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "modelVersion": "aquarium-subconnectome-v1",
+  "source": "Report 3 selected top60 virtual neural controller",
+  "selectedFraction": 0.6,
+  "neuronCount": 3013,
+  "edgeCount": 46846,
+  "graphHash": "b7bfb2bf66efaf91ef704beb5f292d6cc17a91f91aba8e73e664d02a96fc9846",
+  "inputOrder": [
+    "sugar",
+    "bitter",
+    "hearing",
+    "loom",
+    "wind",
+    "pfl3L",
+    "pfl3R",
+    "visForward",
+    "visReverse"
+  ],
+  "outputOrder": [
+    "ingestion",
+    "proboscis",
+    "salivary",
+    "giantFiber",
+    "escapeWing",
+    "forward",
+    "backward",
+    "dNa02L",
+    "dNa02R"
+  ],
+  "inputSizes": {
+    "sugar": 129,
+    "bitter": 65,
+    "hearing": 393,
+    "loom": 314,
+    "wind": 373,
+    "pfl3L": 12,
+    "pfl3R": 12,
+    "visForward": 35,
+    "visReverse": 164
+  },
+  "outputSizes": {
+    "ingestion": 28,
+    "proboscis": 24,
+    "salivary": 2,
+    "giantFiber": 2,
+    "escapeWing": 8,
+    "forward": 2,
+    "backward": 4,
+    "dNa02L": 1,
+    "dNa02R": 1
+  },
+  "decoderScales": {
+    "ingestion": 54.285714285714285,
+    "proboscis": 32.916666666666664,
+    "salivary": 5,
+    "giantFiber": 192.5,
+    "escapeWing": 105.3125,
+    "forward": 76.25,
+    "backward": 50.625,
+    "dNa02L": 117.5,
+    "dNa02R": 87.5
+  },
+  "neural": {
+    "dtMs": 0.1,
+    "tauMms": 20,
+    "tauSynMs": 5,
+    "thresholdRelativeMv": 7,
+    "refractorySteps": 22,
+    "delaySteps": 18,
+    "weightMvPerSignedSynapse": 0.275,
+    "poissonKickMv": 68.75
+  },
+  "files": {
+    "rowstart.i32": {
+      "bytes": 12056,
+      "sha256": "74df787739cd3073d495aa30db383203a32feba1991eecad57c033b36f1c8483"
+    },
+    "col.i32": {
+      "bytes": 187384,
+      "sha256": "b26887e520a17a1830bd43f807953c1a9c40bdaf60835957fec126802c7fdb2f"
+    },
+    "w.f32": {
+      "bytes": 187384,
+      "sha256": "4aaa5fe0c717aaded5a9c51ccbdcb8bcfbcf739511ae2fccbd05697be68517f5"
+    },
+    "orig.i32": {
+      "bytes": 12052,
+      "sha256": "6310833ba31ad86a1531a18c9ddd5e7ce5a37773b7e578a9a3e13c2a0112c8b1"
+    },
+    "groups.json": {
+      "bytes": 7514,
+      "sha256": "a03a70ea193b237a24f58e4b0369537432c576aa177f6fdcc3d351ab4a59d767"
+    },
+    "brain-pos.f32": {
+      "bytes": 36156,
+      "sha256": "bd056640b91f01b1d1e309b371c6a0933b8bf71c3b0004451f5c5a51113f34dc"
+    },
+    "brain-class.u8": {
+      "bytes": 3013,
+      "sha256": "6fc590aa04bf3c5908c919591a31bae099a5ad424156af2174edbabd242ac827"
+    },
+    "brain-meta.json": {
+      "bytes": 152394,
+      "sha256": "fab72c569c74a7a8d1343e73603d4d066284ea11a379c3ebbf63a6d8cb8caf84"
+    }
+  }
+}

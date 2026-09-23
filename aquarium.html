@@ -242,6 +242,7 @@
       <div class="row"><select id="mfSpecies" style="flex:1"></select><button id="mfAdd">Add</button><button id="mfRemove">Remove</button></div>
       <div class="row"><label>Name <input id="mfName" type="text" maxlength="40" style="width:130px"></label></div>
       <div class="row"><label>Model <select id="mfModel"></select></label></div>
+      <div class="row" id="mfHabitats"><span>Lives in</span></div>
       <div class="row"><label>Size <input id="mfSize" type="range" min="0" max="1" step="0.001"></label><span id="mfSizeVal"></span></div>
       <div class="row"><label>Speed <input id="mfSpeed" type="range" min="0" max="3" step="0.05"></label><span id="mfSpeedVal"></span></div>
       <div class="row"><label>Per cloud <input id="mfCount" type="range" min="0" max="2000" step="1"></label><span id="mfCountVal"></span></div>
@@ -249,7 +250,7 @@
       <div class="row"><label>Spread <input id="mfSpread" type="range" min="0.05" max="1" step="0.01"></label><span id="mfSpreadVal"></span></div>
       <div class="row"><label>Depth <input id="mfDepth" type="range" min="0.002" max="0.1" step="0.001"></label><span id="mfDepthVal"></span></div>
       <div class="row"><label>Draw distance <input id="mfDraw" type="range" min="0.05" max="5" step="0.05"></label><span id="mfDrawVal"></span></div>
-      <div class="legend">Likelihood is the chance that each duckweed patch holds a cloud of this species. Spread is how much of the patch a cloud covers. Depth is how far below the surface it reaches; it is densest against the fronds. Draw distance is how far from the camera the species is still drawn.</div>
+      <div class="legend">Likelihood is the chance that each duckweed patch holds a cloud of this species. Spread is how much of the patch a cloud covers. Depth is how far the cloud reaches from the surface it lives on: down from the duckweed, up from a cave floor, a log or the algae. It is densest against that surface. Draw distance is how far from the camera the species is still drawn.</div>
       <div class="row"><button id="mfReset">Reset</button></div>
     </div>
 
@@ -312,6 +313,7 @@ import { buildDuckweedArrays, buildAlgaeArrays, ALGAE, DUCKWEED } from './aquari
 import { BUBBLES, placeBubbleSpots, buildBubbleArrays, bubbleAt } from './aquarium-bubbles.js';
 import {
   createMicrofauna, resolveMicrofauna, newSpecies, MICROFAUNA, MICROFAUNA_CONTROLS, MICROFAUNA_MODELS, MICROFAUNA_MODEL_KEYS,
+  MICROFAUNA_HABITATS, MICROFAUNA_HABITAT_KEYS,
 } from './aquarium-microfauna.js';
 import {
   CURRENT_DEFAULTS, resolveCurrent, resolveCurrentSpecies, currentHeading,
@@ -770,7 +772,7 @@ let neuralUI = null, compareUI = null, experimentUI = null, aquariumTabs = null;
 let fishMeshes = [];
 const proceduralGeos = new Map();   // species -> geometry, shared by every fish of that species
 let inspectorRows = [];        // one per fish, built with the tank and only read from after
-const growthDrawn = { algae: 0 };   // strands actually built, so the current panel lists algae only when there is some
+const growthDrawn = { algae: 0, tufts: [] };   // strands actually built, so the current panel lists algae only when there is some; tufts seat micro fauna
 let plantGroup, hardscapeGroup, navGroup, growthGroup, substrate, grass, flakeMesh;
 let waterProfile = null;
 const uClock = uniform(0, 'float');           // seconds, drives plant sway
@@ -790,8 +792,9 @@ let last = performance.now();
 const STOCK_FILE = 'aquarium-stock.json';
 const store = createDiskStore({
   // RELATIVE, not '/' + STOCK_FILE: an absolute path resolves to the SITE root, which is the
-  // repo root only when the page is served from it. Under GitHub Pages the page lives at
-  // /<repo>/ and the absolute form 404s, so the tank silently regenerated from defaults.
+  // repo root only when the page is served from it. Hosted under a sub-path (GitHub Pages
+  // serves /<repo>/) the absolute form 404s, disk-store reads that as 'no file yet', and the
+  // tank regenerates from defaults instead of loading the saved one.
   read: STOCK_FILE, write: '/api/save-aquarium',
   storage: localStorage, key: 'pcw:aquariumStock', debounceMs: 700,
 });
@@ -977,6 +980,7 @@ async function build(seed, fishCount, savedStock = null) {
   buildGrowth();
   microfauna.rebuild({
     seed: scape.seed, tank: TANK, floaters: scape.floaters, waterLevel: WATER_LEVEL,
+    hardscape: world.hardscape, heightAt: scape.heightAt, tufts: growthDrawn.tufts,
     settings: microfaunaSettings,
   });
   buildBubbles();
@@ -1188,6 +1192,7 @@ function buildGrowth() {
 
   const a = buildAlgaeArrays({ surfaces: hardscapeSurfaces(), seed: scape.seed, amount: scape.plantSettings.algae, bounds: TANK });
   growthDrawn.algae = a.strands;
+  growthDrawn.tufts = a.tufts;
   if (a.strands) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(a.positions, 3));
@@ -3502,6 +3507,21 @@ function syncMicrofaunaUI() {
       model.appendChild(o);
     }
   }
+  const habs = el('mfHabitats');
+  if (!habs.querySelector('input')) {
+    for (const k of MICROFAUNA_HABITAT_KEYS) {
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox'; box.dataset.habitat = k;
+      // Changing where a species lives changes its leaders, so it rebuilds that species.
+      box.onchange = () => {
+        mfEdit({ habitats: [...habs.querySelectorAll('input:checked')].map(b => b.dataset.habitat) });
+        mfCommit();
+      };
+      label.append(box, ' ' + MICROFAUNA_HABITATS[k].label);
+      habs.appendChild(label);
+    }
+  }
   const list = microfaunaSettings.species;
   el('mfSpecies').replaceChildren(...list.map((s) => {
     const o = document.createElement('option');
@@ -3512,12 +3532,14 @@ function syncMicrofaunaUI() {
   for (const id of ['mfSpecies', 'mfName', 'mfModel', 'mfSize', 'mfSpeed', 'mfCount', 'mfChance', 'mfSpread', 'mfDepth', 'mfDraw', 'mfRemove']) el(id).disabled = !cur;
   el('mfAdd').disabled = list.length >= MICROFAUNA.maxSpecies;
   if (!cur) {
+    for (const b of habs.querySelectorAll('input')) { b.checked = false; b.disabled = true; }
     for (const id of ['mfSizeVal', 'mfSpeedVal', 'mfCountVal', 'mfChanceVal', 'mfSpreadVal', 'mfDepthVal', 'mfDrawVal']) el(id).textContent = '';
     el('mfName').value = '';
     return;
   }
   mfSelected = cur.id;
   el('mfSpecies').value = String(cur.id);
+  for (const b of habs.querySelectorAll('input')) { b.checked = cur.habitats.includes(b.dataset.habitat); b.disabled = false; }
   // Not while typing in it: rewriting a focused field moves the caret.
   if (document.activeElement !== el('mfName')) el('mfName').value = cur.name;
   model.value = cur.model;

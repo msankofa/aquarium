@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "report6-acute-stimulus-effects-v3-settled",
+  "name": "Report 6 - Acute stimulus effects v3 settled",
+  "createdAt": "2026-09-21T15:35:00.000Z",
+  "steps": [
+    {"id":"feeding-goldeen","scenario":"feeding","durationSec":20,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"118_goldeen"},
+    {"id":"feeding-tentacool","scenario":"feeding","durationSec":20,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"072_tentacool"},
+    {"id":"feeding-kabuto","scenario":"feeding","durationSec":20,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"140_kabuto"},
+
+    {"id":"looming-tentacool","scenario":"looming","durationSec":10,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"072_tentacool"},
+    {"id":"looming-kabuto","scenario":"looming","durationSec":10,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"140_kabuto"},
+    {"id":"looming-goldeen","scenario":"looming","durationSec":10,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"118_goldeen"},
+
+    {"id":"food-loom-kabuto","scenario":"food-loom","durationSec":20,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"140_kabuto"},
+    {"id":"food-loom-goldeen","scenario":"food-loom","durationSec":20,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"118_goldeen"},
+    {"id":"food-loom-tentacool","scenario":"food-loom","durationSec":20,"settleSec":8,"replicates":4,"baseSeed":31001,"fish1Species":"072_tentacool"}
+  ]
+}
