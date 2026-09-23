@@ -372,7 +372,7 @@ export function tierLayout(habitat, rec, animatedRadius) {
 }
 
 /** One species: a flock sim and its GPU renderer, one leader per layer per habitat it lives in. */
-function buildPopulation({ renderer, scene, camera, rec, worldSeed, habitats }) {
+function buildPopulation({ renderer, scene, camera, rec, worldSeed, habitats, look }) {
   const opts = speciesOpts(rec.model, rec.size);
   const geo = buildCreatureGeometry(opts);
   const animatedRadius = geo.userData.fauna.animatedRadius;
@@ -380,7 +380,7 @@ function buildPopulation({ renderer, scene, camera, rec, worldSeed, habitats }) 
 
   const capacity = Math.max(1, habitats.length * MICROFAUNA.tiers);
   const gpu = createFaunaRenderer({
-    renderer, scene, camera, opts,
+    renderer, scene, camera, opts, ...look,
     leaderCapacity: capacity,
     memberSlotsPerLeader: MICROFAUNA_STRIDE,
     maxStorageBufferBindingSize: renderer.backend?.device?.limits?.maxStorageBufferBindingSize ?? Infinity,
@@ -433,7 +433,9 @@ function disposePopulation(pop) {
  * exists); `apply` takes new settings -- a species that appeared, vanished, or changed size, model
  * or habitats is rebuilt, every other change is live; `update` steps the sims once a frame.
  */
-export function createMicrofauna({ renderer, scene, camera }) {
+export function createMicrofauna({ renderer, scene, camera, receiveShadow = false, colorNode = null }) {
+  // Passed to every species' renderer: the tank's shadows, and its water colour (see fauna-gpu.js).
+  const look = { receiveShadow, colorNode };
   const pops = new Map();   // species id -> population
   let habitats = [], seed = 1, disposed = false;
 
@@ -442,7 +444,7 @@ export function createMicrofauna({ renderer, scene, camera }) {
     pops.delete(rec.id);
     const mine = speciesHabitats(habitats, rec);
     if (!mine.length) return;
-    pops.set(rec.id, buildPopulation({ renderer, scene, camera, rec, habitats: mine, worldSeed: (seed + rec.id) >>> 0 }));
+    pops.set(rec.id, buildPopulation({ renderer, scene, camera, rec, habitats: mine, look, worldSeed: (seed + rec.id) >>> 0 }));
   }
 
   function apply(settings) {

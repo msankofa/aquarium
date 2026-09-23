@@ -532,7 +532,7 @@ def append_self_portrait_made(body_bytes):
     body = json.loads(body_bytes.decode('utf-8'))
     if not isinstance(body, dict):
         raise ValueError('expected a JSON object')
-    effects = {'made', 'lit', 'doused', 'melted', 'struck'}
+    effects = {'made', 'lit', 'doused', 'melted', 'struck', 'removed'}
     effect = str(body.get('effect', 'made'))
     if effect not in effects:
         raise ValueError('unknown effect')

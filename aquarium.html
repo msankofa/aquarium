@@ -655,7 +655,8 @@ const uBubbleRide = uniform(1, 'float');
 // The daphnia/copepod/algae cloud in the duckweed's phyllosphere: the fauna.js/fauna-flock.js/
 // fauna-gpu.js stateless-member system, seated on habitats clustered from scape.floaters rather
 // than sampled from terrain. See aquarium-microfauna.js.
-const microfauna = createMicrofauna({ renderer, scene, camera });
+// Shadowed and coloured by the water like everything else in the tank, rather than lit as if in open air.
+const microfauna = createMicrofauna({ renderer, scene, camera, receiveShadow: true, colorNode: tankColor });
 let microfaunaSettings = resolveMicrofauna(null);
 let mfSelected = 0;   // the species id the Micro fauna panel is editing
 

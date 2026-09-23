@@ -269,6 +269,11 @@ export function createFaunaRenderer({
   // Build-time detail tier. Base Game leaves this at 0 -- TRIANGLE_BUDGET is a tier-0 contract and
   // this draw is the consumer it protects. Raised only by close-range pages such as the studio.
   lod = 0,
+  // Opt-in, for a page whose scene is not open air. `receiveShadow` samples the page's shadow maps;
+  // `colorNode(vertexColor)` wraps the baked colour (the aquarium runs it through its water optics).
+  // Both default to what Base Game has always drawn.
+  receiveShadow = false,
+  colorNode = null,
 } = {}) {
   if (!renderer) throw new Error('createFaunaRenderer: renderer is required');
   if (!scene) throw new Error('createFaunaRenderer: scene is required');
@@ -481,7 +486,10 @@ export function createFaunaRenderer({
   };
 
   // ---- material ---------------------------------------------------------
-  const material = new MeshLambertNodeMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  // With a colorNode, vertexColors must be OFF: NodeMaterial multiplies the vertex colour into any
+  // colorNode it is given, so leaving it on would apply the baked colour twice.
+  const material = new MeshLambertNodeMaterial({ vertexColors: !colorNode, side: THREE.DoubleSide });
+  if (colorNode) material.colorNode = colorNode(attribute('color', 'vec3'));
 
   material.positionNode = Fn(() => {
     const candidate = visible.element(instanceIndex).toVar();
@@ -690,7 +698,7 @@ export function createFaunaRenderer({
   // culling would hide the whole flock at the screen edge. Visibility is the cull's job.
   mesh.frustumCulled = false;
   mesh.castShadow = false;
-  mesh.receiveShadow = false;
+  mesh.receiveShadow = !!receiveShadow;
   mesh.matrixAutoUpdate = false;
   mesh.matrix.identity();
   mesh.matrixWorld.identity();

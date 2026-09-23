@@ -2378,9 +2378,47 @@ becomes both default species' likelihood. The ranges were widened because two sa
 the old rails (0.1 mm and 500).
 
 Both species advance and upload once a frame from `aquarium.html`'s main loop
-(`microfauna.update(running ? dt : 0)`), the `base-game-fauna.js` arrangement. Unlike bubbles, this
-has **not** been headlessly compiled: `createFaunaRenderer` builds storage buffers and compute
-kernels, not just a `NodeMaterial` graph, and this repo's own `base-game-fauna.js` tests avoid
-exercising a real one for exactly that reason (`createRenderer` is injectable so they can substitute
-a fake). What is verified here is everything Node can check without a GPU -- geometry at every size,
-habitat placement, the settings, and the flock sim's containment -- and the render itself is unseen.
+(`microfauna.update(running ? dt : 0)`), the `base-game-fauna.js` arrangement.
+
+**Shadows and water colour.** Micro fauna are lit like everything else in the tank: they receive
+the tank's shadows (a cloud in a cave or under a log is in its shade) and their colour goes through
+`tankColor()`, the same fog, absorption and depth tint every other surface gets. Both reach
+`fauna-gpu.js` as opt-in options (`receiveShadow`, `colorNode`) through
+`createMicrofauna({ receiveShadow: true, colorNode: tankColor })`; Base Game still draws without
+either. They cast no shadow -- at 0.02-6 mm there is nothing to see, and casting would add every
+instance to the shadow pass -- and they take no caustics.
+
+The material compiles headlessly both ways (`scratchpads/aquarium-microfauna/tsl-compile-check.mjs`,
+through `tsl-build-check.mjs`, which does handle this material's storage reads). The shadow sampling
+itself needs a real shadow map, so it is set, not observed. Everything else Node can check is
+tested -- geometry at every size, habitat placement, the settings, and the flock sim's containment --
+and the render itself is unseen.
+
+## Publishing the standalone repo
+
+The aquarium is also published on its own as `msankofa/aquarium` (served by GitHub Pages). That
+repo is **built from this folder**, not edited: `node tools/publish-aquarium.mjs` assembles one
+commit from the files listed in `aquarium-publish/manifest.json`, as they are on disk here, plus the
+files in `aquarium-publish/root/` that exist only in the standalone repo (its `README.md`, the
+`index.html` redirect, `package.json`, `.gitignore` and `run-tests.mjs`). A plain push cannot do this:
+git pushes whole commits, and a commit here is every subsystem. So the commit is assembled in a
+private index (`.git/publish-aquarium.index`), on top of the standalone repo's own history, and
+neither this repo's index nor its working tree is touched.
+
+- **Dry run by default.** It fetches the standalone repo, builds the tree, and lists what would
+  change, marking any published file that is uncommitted or untracked here. It lists any local
+  module a published file imports that the manifest does not publish (the page would 404 on it).
+  It then unpacks that exact tree into `scratchpads/aquarium-publish-check/` and runs the standalone
+  repo's own `run-tests.mjs` against it.
+- **`--push -m "message"`** does the same, then pushes. It fast-forwards only, so a push someone
+  else made in the meantime is refused, never overwritten.
+- **From disk, not from HEAD.** The aquarium's neural work (`aquarium-neural-*.js`, the telemetry,
+  the protocols, their tests) has been published from this folder without ever being committed
+  here. Building from HEAD would delete it from the standalone repo, so the report marks it instead.
+- **A new aquarium file** goes in the manifest. A file that must differ between the two repos goes
+  in the overlay, never in both (the script refuses that).
+
+Before this, the standalone repo was kept in step by copying files across by hand, and it had
+drifted: on 2026-09-23 it lacked the micro fauna shadows and water colour, and had never had a way
+to tell which workshop files were uncommitted. Its history up to then (`ec8ed0c`..`8c78b1a`) is kept;
+the publisher builds on top of it.
