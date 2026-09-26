@@ -4,6 +4,15 @@
 <style>
   body { margin: 0; background: #0e1114; color: #d8dde6; font: 13px/1.5 system-ui, sans-serif; }
   canvas { display: block; }
+  /* Viewing mode (H): everything but the tank and its hint is hidden. */
+  body.viewing > :not(.tank-canvas):not(#viewHint) { display: none !important; }
+  #viewHint { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 6px 12px;
+    border-radius: 6px; background: #000a; color: #e8edf5; font: 13px system-ui, sans-serif;
+    pointer-events: none; opacity: 0; transition: opacity .6s; z-index: 10; }
+  #viewHint.show { opacity: 1; }
+  /* Dev switch off: only the player sections, and no tab row. */
+  #panel:not(.dev) [data-audience="dev"], #panel:not(.dev) #panelTabs { display: none; }
+  .dev-toggle { font-size: 11px; color: #9aa4b2; display: inline-flex; align-items: center; gap: 3px; }
   #panel { position: fixed; top: 0; right: 0; width: 320px; height: 100vh;
            background: #1b1e24; border-left: 1px solid #2a2f38; box-sizing: border-box;
            display: flex; flex-direction: column; }
@@ -80,12 +89,14 @@
 } }
 </script>
 
+<div id="viewHint">Press H to show the panel.</div>
 <div id="panel">
   <div class="panel-head">
     <span class="title">Aquarium</span>
     <span class="head-tools">
       <button id="expandAll" title="Open every section">Open</button>
       <button id="collapseAll" title="Close every section">Close</button>
+      <label class="dev-toggle" title="Show the tuning sections and the Neural, Compare and Experiments tabs"><input type="checkbox" id="devMode"> Dev</label>
     </span>
     <button id="panelMin" title="Minimise the panel">–</button>
   </div>
@@ -422,6 +433,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setClearColor(0x0e1114);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.domElement.classList.add('tank-canvas');
 document.body.appendChild(renderer.domElement);
 await renderer.init();
 
@@ -2778,43 +2790,48 @@ const inspectorEl = document.getElementById('inspector');
 // What is open by default is what someone opening the tank wants first: the tank's own buttons, and
 // the fish. Everything else is tuning, and tuning that is always open is a wall.
 
+// [title, group, cluster, collapsed, audience]: 'player' sections show with the Dev switch off.
 const SECTION_PLAN = [
-  ['Tank', 'tank', 'The tank', false],
-  ['Light', 'light', null, true],
-  ['Lamp', 'lamp', null, true],
-  ['Water', 'water', null, true],
-  ['Look', 'look', null, true],
-  ['Sound', 'sound', null, true],
+  ['Tank', 'tank', 'The tank', false, 'player'],
+  ['Light', 'light', null, true, 'dev'],
+  ['Lamp', 'lamp', null, true, 'dev'],
+  ['Water', 'water', null, true, 'dev'],
+  ['Look', 'look', null, true, 'player'],
+  ['Sound', 'sound', null, true, 'player'],
 
-  ['Fish size', 'size', 'Fish', true],
-  ['Swim speed', 'speed', null, true],
-  ['Swimming motion', 'motion', null, true],
-  ['Pokémon models', 'models', null, true],
-  ['Every fish', 'inspector', null, false],
+  ['Fish size', 'size', 'Fish', true, 'dev'],
+  ['Swim speed', 'speed', null, true, 'dev'],
+  ['Swimming motion', 'motion', null, true, 'dev'],
+  ['Pokémon models', 'models', null, true, 'player'],
+  ['Every fish', 'inspector', null, false, 'player'],
 
-  ['Rocks & wood', 'rocks', 'The scape', true],
-  ['Plants', 'plants', null, true],
-  ['Micro fauna', 'microfauna', null, true],
-  ['Current', 'current', null, true],
-  ['Collision', 'collision', null, true],
+  ['Rocks & wood', 'rocks', 'The scape', true, 'dev'],
+  ['Plants', 'plants', null, true, 'dev'],
+  ['Micro fauna', 'microfauna', null, true, 'dev'],
+  ['Current', 'current', null, true, 'dev'],
+  ['Collision', 'collision', null, true, 'dev'],
 
-  ['Readings', 'stats', 'Reading the scene', true],
+  ['Readings', 'stats', 'Reading the scene', true, 'dev'],
 ];
 
 const sectionHost = document.getElementById('sections');
 const groupsEl = document.getElementById('groups');
 
 function buildSections() {
-  let cluster = null;
-  for (const [title, group, clusterName, collapsed] of SECTION_PLAN) {
+  let cluster = null, clusterHead = null;
+  for (const [title, group, clusterName, collapsed, audience] of SECTION_PLAN) {
     if (clusterName && clusterName !== cluster) {
       cluster = clusterName;
-      const head = document.createElement('div');
-      head.className = 'cluster';
-      head.textContent = clusterName;
-      sectionHost.appendChild(head);
+      clusterHead = document.createElement('div');
+      clusterHead.className = 'cluster';
+      clusterHead.textContent = clusterName;
+      clusterHead.dataset.audience = 'dev';
+      sectionHost.appendChild(clusterHead);
     }
+    // A cluster heading shows with the Dev switch off if any section under it does.
+    if (audience === 'player' && clusterHead) clusterHead.dataset.audience = 'player';
     const body = createSection(sectionHost, title, { collapsed });
+    body.parentElement.dataset.audience = audience;
     const node = groupsEl.querySelector(`[data-group="${group}"]`);
     if (node) body.appendChild(node);
     else console.warn(`[aquarium] the section plan names a group "${group}" that the panel does not have`);
@@ -2891,8 +2908,21 @@ document.getElementById('collapseAll').onclick = () => { setAllSectionsCollapsed
 sectionHost.addEventListener('click', (e) => { if (e.target.closest('.sec-head')) saveStock(); });
 
 function uiState() {
-  return { minimised: panelMinimised, activeTab: aquariumTabs?.current || 'tank', sections: readSectionStates(sectionHost) };
+  return { minimised: panelMinimised, dev: devMode, activeTab: aquariumTabs?.current || 'tank', sections: readSectionStates(sectionHost) };
 }
+
+// The Dev switch: tuning sections and the diagnostic tabs. A file without `ui.dev` opens with it on;
+// `?dev=1` forces it on.
+const DEV_FORCED = new URLSearchParams(location.search).get('dev') === '1';
+let devMode = true;
+const devBox = document.getElementById('devMode');
+function setDevMode(on) {
+  devMode = !!on;
+  panelEl.classList.toggle('dev', devMode);
+  devBox.checked = devMode;
+  if (!devMode) aquariumTabs?.select('tank');
+}
+devBox.onchange = () => { setDevMode(devBox.checked); saveStock(); };
 
 function applyUiState(state) {
   if (!state || typeof state !== 'object') return;
@@ -2902,6 +2932,7 @@ function applyUiState(state) {
 }
 
 applyUiState(saved && saved.ui);
+setDevMode(DEV_FORCED || saved?.ui?.dev !== false);
 
 playBtn.onclick = () => { running = !running; playBtn.textContent = running ? 'Pause' : 'Play'; };
 function dropFoodAt({ x = null, z = 0, count = 6, spread = 0.04 } = {}) {
@@ -3490,6 +3521,23 @@ syncLookUI();
 const startAudio = () => audio.start();
 addEventListener('pointerdown', startAudio);
 addEventListener('keydown', startAudio);
+
+// ---- Viewing mode: H hides every panel and readout; H or Esc brings them back. Not saved. ----
+let viewing = false, viewHintTimer = 0;
+const viewHint = document.getElementById('viewHint');
+function setViewing(on) {
+  viewing = on;
+  document.body.classList.toggle('viewing', on);
+  resizeRenderer();
+  clearTimeout(viewHintTimer);
+  viewHint.classList.toggle('show', on);
+  if (on) viewHintTimer = setTimeout(() => viewHint.classList.remove('show'), 3000);
+}
+addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.('input, select, textarea')) return;
+  if (e.key === 'h' || e.key === 'H') setViewing(!viewing);
+  else if (e.key === 'Escape' && viewing) setViewing(false);
+});
 const _pan = new THREE.Vector3();
 /** -1 (left edge of the view) .. 1 (right edge) for a point in the tank. */
 function screenPan(x, y, z) {

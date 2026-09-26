@@ -1853,6 +1853,42 @@ flat at random is not a Goldeen at all — which is what the tank had, six skins
 This is what makes Goldeen solitary and Magikarp communal, and it needed no new machinery at all:
 `aquarium-policy.js` already scored `follow` off `sociability`.
 
+## Player and developer panels
+
+A **Dev** checkbox in the panel header splits the panel. Each `SECTION_PLAN` row carries an audience
+as its fifth field:
+
+- **player**: Tank, Look, Sound, Pokémon models, Every fish.
+- **dev**: Light, Lamp, Water, Fish size, Swim speed, Swimming motion, Rocks & wood, Plants, Micro
+  fauna, Current, Collision, Readings.
+
+`buildSections` writes the audience onto each `.sec` card as `data-audience`. A cluster heading gets
+`player` if any section under it is a player section. With the switch off, one CSS rule hides every
+`[data-audience="dev"]` and the tab row (Neural, Compare, Experiments), and the Tank tab is selected.
+
+The switch saves in the stock file's `ui` block as `dev`, next to `minimised`. A file without it opens
+with Dev on, so nothing changes until someone turns it off. `?dev=1` forces it on.
+
+Seen in Chrome 2026-09-26: with Dev off, the panel showed Tank, Look and Sound under "The tank",
+Pokémon models and Every fish under "Fish", and no tab row; with it on, every section and the tabs.
+`?dev=1` was not tried, because the page was in use at the same time and its saves were flipping the
+switch. The plan's Node test for this was dropped: `test-aquarium-stock.mjs` has no UI-state round
+trip to extend, and the rule is one expression (`DEV_FORCED || saved?.ui?.dev !== false`).
+
+## Viewing mode
+
+**H** hides every panel and readout so only the tank shows; **H** again or **Esc** brings them back.
+The body gets the class `viewing`, and one CSS rule hides every child of `<body>` except the
+renderer's canvas (class `tank-canvas`) and `#viewHint`. So the panel, the `?prof` readout, the probe
+button and any overlay go without each needing its own rule. `resizeRenderer()` then widens the canvas
+to the full window. On entering, "Press H to show the panel." shows at the bottom for 3 s and fades.
+
+Keys typed into an input, select or textarea, or with Ctrl, Alt or Meta held, are ignored. The mode is
+not saved, so the page always opens with its panel.
+
+Checked in Chrome 2026-09-26: H hid everything and widened the tank, the hint faded, Esc restored the
+panel, and an H typed into the seed field did nothing.
+
 ## The panel: sections, and what a control is allowed to reach
 
 The panel was a flat stack of `<h2>` and `.row`, which was right for six sliders and stopped being
