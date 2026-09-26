@@ -16,6 +16,7 @@ with is a pure module beneath it.
 | `aquarium-plant-batch.js` | packs every plant of one species into one geometry, with the per-plant values as vertex attributes; CPU reference for the batch shader | pure |
 | `aquarium-model-merge.js` | packs a Stadium model's texture tiles into one atlas and its skinned parts into one geometry; CPU reference for the tile sample | pure |
 | `aquarium-look.js` | the Look panel's post-processing settings: defaults (the user's look), limits, and `resolveLookSettings` for a saved `look` block | pure |
+| `aquarium-audio.js` | the tank's sound: water bed and bubble pops on Web Audio (`synth-utils.js`), levels, the pop rate limit, Minnaert pitch | pure (Web Audio, no THREE) |
 | `aquarium-bubbles.js` | bubbles rising from the sand: where, when, and the CPU reference for the shader | pure |
 | `aquarium-water.js` | underwater optics as TSL, applied per-material | needs three |
 | `aquarium.html` | scene, glass, fish meshes, plants, grass, flakes, feed control, inspector, persistence | — |
@@ -36,7 +37,7 @@ with is a pure module beneath it.
 Tests: `test-aquarium-world.mjs`, `test-aquarium-locomotion.mjs`, `test-aquarium-policy.mjs`, The neural suites are `test-aquarium-neural-config.mjs`, `test-aquarium-neural-runtime.mjs`, `test-aquarium-neural-controller.mjs` and `test-aquarium-neural-integration.mjs`.
 `test-aquarium-scape.mjs`, `test-aquarium-water.mjs`, `test-aquarium-species.mjs`,
 `test-aquarium-stock.mjs`, `test-aquarium-growth.mjs`, `test-aquarium-bubbles.mjs`,
-`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-plant-batch.mjs`, `test-aquarium-model-merge.mjs`, `test-aquarium-look.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
+`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-plant-batch.mjs`, `test-aquarium-model-merge.mjs`, `test-aquarium-look.mjs`, `test-aquarium-audio.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
 
 `test-aquarium-stock.mjs` exercises the real `disk-store.js` against a fake `serve.py`, because the
 persistence claim is about the WIRING — what reaches disk and what comes back — not about a shape
@@ -1268,6 +1269,93 @@ The **Look** section (after Water) runs the whole frame through `post-fx.js`, th
 Checked in Chrome 2026-09-26: at the defaults, post on looks the same as post off, draws go from
 96 to 108 (the bloom passes), and the page stays at 56-60 fps. AgX with bloom and vignette visibly
 changes the image, and turning post off restores the plain image and 96 draws.
+
+### Switching post on or off without a hitch
+
+Post on draws every material into the pass's offscreen target; post off draws them through the
+renderer's own frame-buffer target. Each needs its own GPU pipelines, render targets, output pass and
+shadow pipelines. Built on the first frame that needs them, they stalled the page. Measured per
+frame with requestAnimationFrame (the `?prof` readout is an average and hid the spike):
+
+| switch | before | after |
+|---|---|---|
+| post on | first frame ~516 ms, then ~6 s at ~28 fps | worst 16.8 ms, no frame over 20 ms |
+| post off | one ~300 ms frame | worst 18.3 ms, no frame over 20 ms |
+
+(Claude's Chrome tab, 2026-09-26. One of three runs turning post on had a single 33 ms frame 1.5 s
+after the click, which the other two did not.)
+
+How it works, in `aquarium.html`:
+
+- `warmSwitchSoon()` runs 800 ms after each `build()` and whenever post switches on or off. It
+  compiles the path that is NOT drawing: `postFX.warm()` when post is off, a plain
+  `renderer.compileAsync(scene, camera)` when post is on. It skips a path that has drawn since the
+  last build (`drawnSinceBuild`), so switching back and forth does no repeated work.
+- When that compile finishes it sets `primeOther`. On the next frame the loop draws the inactive
+  path once before the real render (post path with its tone mapping, or plain path with none) and
+  forces a shadow update. That pays for render targets, the output pass and shadow pipelines at the
+  inactive path's call depth. The real render then overwrites the canvas, so nothing shows.
+- `post-fx.js`'s `warm()` has to ask for render contexts at call depth 1. The scene pass renders
+  nested inside the output quad, three keys contexts by depth, and `compileAsync` always asks for
+  depth 0; without the patch the first post render still took ~500 ms. See `docs/subsystems/fx.md`.
+- `createPostFX` sets `renderer.toneMapping`. `ensurePostFX()` puts it back to none when post is off,
+  or the plain path would tone-map.
+
+Not covered: materials added without a `build()` (for example Add fish) are compiled for the active
+path only, so the first switch after that pays for them.
+
+### Post probe
+
+`?prof=1` adds a **Probe post** button (also `window.aquariumProf.postProbe()`). It steps through nine
+setups on the live tank and prints a table: frame, GPU and CPU submit time (medians over 4 s, after
+2 s to settle) and draw calls. The setups are post off, scene pass only, plus tone mapping, plus
+grade, full, full without MSAA, full at DPR 1.5 and at DPR 1, and post off at DPR 1.5. It saves
+nothing and puts LOOK, the pixel ratio and the post stack back afterwards.
+
+First run, 2026-09-26, Claude's Chrome tab at 1706x724, DPR 2, the user's look:
+
+| setup | frame ms | GPU ms | submit ms | draws |
+|---|---|---|---|---|
+| post off | 16.67 | 6.93 | 3.87 | 96 |
+| scene pass only | 16.67 | 7.29 | 3.66 | 96 |
+| + tone mapping | 16.66 | 7.28 | 3.51 | 96 |
+| + grade | 16.67 | 7.58 | 4.77 | 96 |
+| full (the look) | 16.66 | 8.62 | 4.71 | 108 |
+| full, no MSAA | 16.69 | 6.56 | 6.48 | 108 |
+| full, DPR 1.5 | 16.67 | 6.84 | 3.23 | 108 |
+| full, DPR 1 | 16.66 | 6.72 | 3.14 | 108 |
+| post off, DPR 1.5 | 16.67 | 7.18 | 3.01 | 96 |
+
+At this window size every setup held 60 fps, so the probe did not reproduce the user's report that
+the look drops below 60. The full look added about 1.7 ms of GPU time, most of it bloom (about 1 ms);
+dropping MSAA or the pixel ratio each took about 2 ms back. The DPR rows differ from each other by
+less than the noise, so this tab is not fill-bound. A larger window is the likely difference; a run
+at the user's size is needed.
+
+## Sound
+
+`aquarium-audio.js` synthesises everything; there are no sound files. It is built on `synth-utils.js`,
+not `environment-audio.js`, which is built around music and SFX folders and keeps its settings in
+`localStorage`.
+
+- **Start.** Browsers refuse audio before a user gesture, so the page creates the audio object at
+  load but its `AudioContext` only on the first `pointerdown` or `keydown` anywhere in the page. The
+  Sound section says so.
+- **Graph.** master, which takes the water bed and the bubbles bus. Mute sets master to 0.
+- **Water bed.** Looping noise through two lowpass filters (400 and 900 Hz). A 0.07 Hz LFO moves the
+  first cutoff by ±120 Hz, so it drifts instead of sounding like static.
+- **Bubble pops.** `syncBubbleRipplePops` detects a bubble reaching the surface (the same test the
+  ripples use) and now runs when ripples are on OR audio has started. Each pop is a 50-80 ms sine
+  blip that sweeps up from 0.85 to 1.2 times the bubble's Minnaert frequency, `f = 3.26 / r` Hz
+  (a 2 mm bubble is about 1.6 kHz). It is panned by where the bubble sits on screen (`screenPan`).
+  More than 6 pops inside 0.1 s are dropped.
+- **Settings.** Mute, volume, water and bubbles (0-1), saved in `aquarium-stock.json` under `audio`.
+  Defaults: not muted, volume 0.6, water 0.5, bubbles 0.5.
+- `?prof=1` adds `window.aquariumProf.audio()` for console probing.
+
+Checked in Chrome 2026-09-26: no context before a gesture, one after a click, and 31 pops in 15 s,
+panned -0.35 to 0.17. Nobody has listened to it yet. `test-aquarium-audio.mjs` runs the module
+against a stub `AudioContext`.
 
 ## Wind is not current
 

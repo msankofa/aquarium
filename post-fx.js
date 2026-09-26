@@ -20,10 +20,11 @@ const TONE = {
 export function createPostFX(opts) {
   const { renderer, scene, camera } = opts;
   const p = opts.params || {};
-  const mode = p.mode === 'on' ? 'full' : (p.mode || 'full');
+  let mode = p.mode === 'on' ? 'full' : (p.mode || 'full');
 
   const pp = new PostProcessing(renderer);
-  const scenePass = pass(scene, camera);
+  // `samples` overrides the renderer's MSAA count for the scene pass (0 = none); omitted, it follows the renderer.
+  const scenePass = pass(scene, camera, p.samples === undefined ? {} : { samples: p.samples });
   const scenePassColor = scenePass.getTextureNode();
   // Defaults are a visual NO-OP (matches the no-post baseline): strength 0 → no bloom.
   const bloomPass = bloom(scenePassColor, p.bloomStrength ?? 0.0, p.bloomRadius ?? 0.6, p.bloomThreshold ?? 0.0);
@@ -59,7 +60,9 @@ export function createPostFX(opts) {
 
   // (re)build the output graph for a given tone-mapping operator. renderOutput applies the
   // renderer's tone mapping + output color space; grade runs on the resulting display color.
+  let tone = p.tone ?? 'none';
   function build(name) {
+    tone = name;
     renderer.toneMapping = TONE[name] ?? THREE.AgXToneMapping;
     if (mode === 'scene') {
       pp.outputNode = scenePassColor;
@@ -77,13 +80,41 @@ export function createPostFX(opts) {
 
   let enabled = p.enabled ?? true;
   return {
-    mode,
+    get mode() { return mode; },
     get enabled() { return enabled; },
     setEnabled(v) { enabled = !!v; },
     async renderAsync() { await pp.renderAsync(); },
     // Synchronous, for a setAnimationLoop callback that is not async (aquarium.html).
     render() { pp.render(); },
     setToneMapping(name) { build(name); },
+    // Switch the output graph ('scene' | 'output' | 'grade' | 'full') without recreating the stack.
+    setMode(m) { mode = m === 'on' ? 'full' : m; build(tone); },
+    get tone() { return tone; },
+    // Compile every scene material for the pass's target ahead of use, so turning post on does not
+    // build pipelines mid-frame. Sets the target the way PassNode.setup will, and restores the
+    // renderer's target before awaiting, so frames rendered meanwhile still go to the screen.
+    async warm() {
+      const rt = scenePass.renderTarget;
+      rt.samples = p.samples === undefined ? renderer.samples : p.samples;
+      rt.texture.type = renderer.getOutputBufferType();
+      const prevTarget = renderer.getRenderTarget(), prevMRT = renderer.getMRT();
+      // The real scene pass renders nested inside the output quad's render, at call depth 1, and
+      // three keys render contexts by depth; compileAsync always asks for depth 0, so without this
+      // its pipelines land under a key the pass never reads (measured: first render still ~500 ms).
+      // Private API (three r184 RenderContexts.get), patched only for compileAsync's sync part.
+      const contexts = renderer._renderContexts, get = contexts.get, own = Object.hasOwn(contexts, 'get');
+      contexts.get = function (target, mrt, depth) { return get.call(this, target, mrt, depth === undefined ? 1 : depth); };
+      renderer.setRenderTarget(rt);
+      renderer.setMRT(null);
+      let done;
+      try { done = renderer.compileAsync(scene, camera); }
+      finally {
+        if (own) contexts.get = get; else delete contexts.get;
+        renderer.setRenderTarget(prevTarget);
+        renderer.setMRT(prevMRT);
+      }
+      await done;
+    },
     setExposure(e) { renderer.toneMappingExposure = e; },
     setBloom(strength, radius, threshold, smoothWidth) {
       bloomPass.strength.value = strength;

@@ -200,6 +200,14 @@
       <div class="row"><button id="lookReset">Reset</button></div>
     </div>
 
+    <div data-group="sound">
+      <div class="row"><label><input type="checkbox" id="soundMuted"> Mute</label></div>
+      <div class="row"><label>Volume <input id="soundMaster" type="range" min="0" max="1" step="0.01"></label><span id="soundMasterVal"></span></div>
+      <div class="row"><label>Water <input id="soundWater" type="range" min="0" max="1" step="0.01"></label><span id="soundWaterVal"></span></div>
+      <div class="row"><label>Bubbles <input id="soundBubbles" type="range" min="0" max="1" step="0.01"></label><span id="soundBubblesVal"></span></div>
+      <div class="legend">Sound starts on the first click or key press in the page.</div>
+    </div>
+
     <div data-group="size">
       <div class="row"><label>Average <input id="sizeMean" type="range" min="0.02" max="0.2" step="0.001"></label><span id="sizeMeanVal"></span></div>
       <div class="row"><label>Spread <input id="sizeSpread" type="range" min="0" max="1" step="0.01"></label><span id="sizeSpreadVal"></span></div>
@@ -368,6 +376,7 @@ import { batchPlants } from './aquarium-plant-batch.js';
 import { packAtlas, tileUV, mergeParts } from './aquarium-model-merge.js';
 import { createPostFX } from './post-fx.js';
 import { LOOK_TONES, resolveLookSettings, lookGrade } from './aquarium-look.js';
+import { createAquariumAudio, resolveAudioSettings } from './aquarium-audio.js';
 import { createGrass } from './grass.js';
 import { FALLBACK_COLORS } from './terrain-textures.js';
 import { createLightingRig } from './lights.js';
@@ -668,6 +677,13 @@ const BUBBLE_TOP = WATER_LEVEL;
 const RIPPLE_SETTINGS = resolveRippleSettings(null);
 // Post-processing, saved under `look`; off until the Look panel turns it on (aquarium-look.js).
 const LOOK = resolveLookSettings(null);
+// The post stack, made on first need (applyLook / warmSwitchSoon below).
+let postFX = null, postTone = null, warmTimer = 0, primeOther = false;
+// Which paths have drawn since the last build(); one that has needs no warming.
+const drawnSinceBuild = { post: false, plain: false };
+// Sound levels, saved under `audio`; the context itself waits for the first gesture (aquarium-audio.js).
+const AUDIO = resolveAudioSettings(null);
+const audio = createAquariumAudio({ createContext: () => new AudioContext(), settings: AUDIO });
 const rippleQueue = [];
 let rippleAmbient = createAmbientRippleState(1, 0);
 const rippleSystem = createRippleSystem({ renderer, tank: TANK, settings: RIPPLE_SETTINGS });
@@ -903,6 +919,7 @@ function saveStock() {
     microfauna: microfaunaSettings,
     ripples: { ...RIPPLE_SETTINGS },
     look: { ...LOOK },
+    audio: { ...AUDIO },
     ui: uiState(),
   });
 }
@@ -943,6 +960,7 @@ function clearGroup(g) {
 }
 
 async function build(seed, fishCount, savedStock = null) {
+  drawnSinceBuild.post = drawnSinceBuild.plain = false;
   clearFish();
   clearBubbles();
   clearGroup(plantGroup); clearGroup(hardscapeGroup); clearGroup(navGroup); clearGroup(growthGroup);
@@ -1014,6 +1032,7 @@ async function build(seed, fishCount, savedStock = null) {
   buildGrass();
   buildFlakes();
   buildFish();
+  warmSwitchSoon();
 }
 
 // ---- substrate ------------------------------------------------------------
@@ -1350,7 +1369,10 @@ function buildBubbles() {
 }
 
 const _popWave = {};
+// A bubble reaching the surface: a ripple when ripples are on, a pop sound once audio has started.
 function syncBubbleRipplePops(t) {
+  const ripples = RIPPLE_SETTINGS.enabled, sound = audio.started;
+  if (!ripples && !sound) return;
   for (let i = 0; i < bubbleRippleRecords.length; i++) {
     const bubble = bubbleRippleRecords[i];
     const prev = bubbleRipplePrev[i];
@@ -1366,7 +1388,8 @@ function syncBubbleRipplePops(t) {
         const w = sampleWaves(waterProfile.table, cur.x, cur.z, t, waterProfile.disp.value, _popWave);
         px += w.dx; pz += w.dz;
       }
-      queueRipple(bubbleRippleSource({ x: px, z: pz, speed, radius: bubble.look[0] }));
+      if (ripples) queueRipple(bubbleRippleSource({ x: px, z: pz, speed, radius: bubble.look[0] }));
+      if (sound) audio.bubblePop({ pan: screenPan(px, BUBBLE_TOP, pz), radius: bubble.look[0] * (1 + BUBBLES.grow) });
       bubbleRippleLastPop[i] = cur.cycle;
     }
     bubbleRipplePrev[i] = cur;
@@ -2693,6 +2716,8 @@ buildGlass();
 const saved = store.json(null);
 Object.assign(RIPPLE_SETTINGS, resolveRippleSettings(saved && saved.ripples));
 Object.assign(LOOK, resolveLookSettings(saved && saved.look));
+Object.assign(AUDIO, resolveAudioSettings(saved && saved.audio));
+audio.set(AUDIO);
 const startSeed = Number.isFinite(saved && saved.seed) ? saved.seed : 3;
 // An EMPTY saved list is not a saved tank -- a file written before any fish existed would
 // otherwise load as an empty aquarium and stay that way, since the count then reads zero too.
@@ -2759,6 +2784,7 @@ const SECTION_PLAN = [
   ['Lamp', 'lamp', null, true],
   ['Water', 'water', null, true],
   ['Look', 'look', null, true],
+  ['Sound', 'sound', null, true],
 
   ['Fish size', 'size', 'Fish', true],
   ['Swim speed', 'speed', null, true],
@@ -3387,20 +3413,47 @@ syncWaterUI();
 // ---- Look: post-fx.js over the whole frame ----
 // Built the first time it is turned on. post-fx.js sets renderer.toneMapping for its output pass,
 // so turning it off puts the renderer back to no tone mapping, or the plain path would tone-map too.
-let postFX = null, postTone = null;
+function ensurePostFX() {
+  if (!postFX) {
+    postFX = createPostFX({ renderer, scene, camera, params: { mode: 'full', tone: LOOK.tone } });
+    postFX.setEnabled(false);
+    // createPostFX sets renderer.toneMapping for its output; the plain path runs without it.
+    if (!LOOK.enabled) renderer.toneMapping = THREE.NoToneMapping;
+    postTone = null;
+  }
+  return postFX;
+}
+// Compile the path that is NOT drawing, in the background, so switching post on or off does not
+// build every pipeline mid-frame: post off -> the pass's target (post-fx.js warm); post on -> the
+// plain screen path. Re-run after a rebuild adds materials.
+function warmSwitchSoon() {
+  clearTimeout(warmTimer);
+  warmTimer = setTimeout(() => {
+    if (drawnSinceBuild[LOOK.enabled ? 'plain' : 'post']) return;
+    const t0 = performance.now();
+    const job = LOOK.enabled ? renderer.compileAsync(scene, camera) : ensurePostFX().warm();
+    job.then(() => {
+      console.info(`[aquarium] ${LOOK.enabled ? 'plain' : 'post'} path precompiled in ${(performance.now() - t0).toFixed(0)} ms`);
+      primeOther = true;
+    })
+      .catch((e) => console.warn('[aquarium] precompile failed:', e.message));
+  }, 800);
+}
 function applyLook() {
   if (!LOOK.enabled) {
+    if (postFX?.enabled) warmSwitchSoon();
     if (postFX) postFX.setEnabled(false);
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.toneMappingExposure = 1;
     postTone = null;
     return;
   }
-  if (!postFX) postFX = createPostFX({ renderer, scene, camera, params: { mode: 'full', tone: LOOK.tone } });
+  ensurePostFX();
   if (postTone !== LOOK.tone) { postFX.setToneMapping(LOOK.tone); postTone = LOOK.tone; }
   postFX.setExposure(LOOK.exposure);
   postFX.setBloom(LOOK.bloomStrength, LOOK.bloomRadius, LOOK.bloomThreshold);
   postFX.setGrade(lookGrade(LOOK));
+  if (!postFX.enabled) warmSwitchSoon();
   postFX.setEnabled(true);
 }
 const lookSliders = [
@@ -3432,6 +3485,35 @@ for (const [id, key] of lookSliders) {
 document.getElementById('lookReset').onclick = () => setLook(resolveLookSettings({ enabled: LOOK.enabled }));
 applyLook();
 syncLookUI();
+
+// ---- Sound ----
+const startAudio = () => audio.start();
+addEventListener('pointerdown', startAudio);
+addEventListener('keydown', startAudio);
+const _pan = new THREE.Vector3();
+/** -1 (left edge of the view) .. 1 (right edge) for a point in the tank. */
+function screenPan(x, y, z) {
+  _pan.set(x, y, z).project(camera);
+  return Math.max(-1, Math.min(1, _pan.x));
+}
+const soundSliders = [['soundMaster', 'master'], ['soundWater', 'water'], ['soundBubbles', 'bubbles']];
+function syncSoundUI() {
+  document.getElementById('soundMuted').checked = AUDIO.muted;
+  for (const [id, key] of soundSliders) {
+    document.getElementById(id).value = AUDIO[key];
+    document.getElementById(id + 'Val').textContent = AUDIO[key].toFixed(2);
+  }
+}
+function setSound(patch) {
+  Object.assign(AUDIO, audio.set(patch));
+  syncSoundUI();
+  saveStock();
+}
+document.getElementById('soundMuted').onchange = (e) => setSound({ muted: e.target.checked });
+for (const [id, key] of soundSliders) {
+  document.getElementById(id).oninput = (e) => setSound({ [key]: parseFloat(e.target.value) });
+}
+syncSoundUI();
 
 const rippleSliders = [
   ['rippleStrength', 'strength', v => v.toFixed(2) + '×'],
@@ -3966,7 +4048,12 @@ if (PROF) {
   profHud.style.cssText = 'position:fixed;left:8px;top:8px;margin:0;padding:6px 8px;background:#000a;color:#9fd;font:11px/1.35 monospace;z-index:9;pointer-events:none';
   document.body.appendChild(profHud);
   const meshesIn = (root) => { let n = 0; root?.traverse((o) => { if (o.isMesh) n++; }); return n; };
-  window.aquariumProf = { fishMeshes: () => fishMeshes };   // console probing, ?prof only
+  window.aquariumProf = { fishMeshes: () => fishMeshes, audio: () => audio, post: () => postFX, renderer, scene, camera, postProbe };   // console probing, ?prof only
+  const probeBtn = document.createElement('button');
+  probeBtn.textContent = 'Probe post';
+  probeBtn.style.cssText = 'position:fixed;left:8px;top:132px;z-index:9;font:11px monospace';
+  probeBtn.onclick = () => postProbe();
+  document.body.appendChild(probeBtn);
   setInterval(() => {
     const i = renderer.info;
     let fishMeshCount = 0;
@@ -3986,6 +4073,75 @@ if (PROF) {
   }, 500);
 }
 const ema = (prev, v) => prev + (v - prev) * 0.1;
+
+/**
+ * ?prof only: step through post-processing setups on the live tank and time each one. Nothing is
+ * saved; LOOK, the pixel ratio and the post stack are put back afterwards. Returns the rows.
+ */
+let probeOut = null;
+async function postProbe({ settle = 2000, sample = 4000 } = {}) {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  const base = { enabled: LOOK.enabled, dpr: renderer.getPixelRatio() };
+  const out = probeOut || (probeOut = document.createElement('pre'));
+  out.style.cssText = 'position:fixed;left:8px;top:160px;margin:0;padding:6px 8px;background:#000c;color:#fd9;font:11px/1.35 monospace;z-index:9';
+  document.body.appendChild(out);
+  let alt = null;
+  const on = (mode) => { LOOK.enabled = true; applyLook(); postFX.setMode(mode); };
+  const off = () => { LOOK.enabled = false; applyLook(); };
+  const dpr = (x) => renderer.setPixelRatio(x);
+  const noMsaa = () => {
+    on('full');
+    alt = createPostFX({ renderer, scene, camera, params: { mode: 'full', tone: LOOK.tone, samples: 0 } });
+    alt.setExposure(LOOK.exposure);
+    alt.setBloom(LOOK.bloomStrength, LOOK.bloomRadius, LOOK.bloomThreshold);
+    alt.setGrade(lookGrade(LOOK));
+    [postFX, alt] = [alt, postFX];
+  };
+  const undo = () => {
+    if (alt) { postFX.dispose(); postFX = alt; alt = null; }
+    dpr(base.dpr);
+  };
+  const setups = [
+    ['post off', off],
+    ['scene pass only', () => on('scene')],
+    ['+ tone mapping', () => on('output')],
+    ['+ grade', () => on('grade')],
+    ['full (the look)', () => on('full')],
+    ['full, no MSAA', noMsaa],
+    [`full, DPR ${Math.min(1.5, base.dpr)}`, () => { on('full'); dpr(Math.min(1.5, base.dpr)); }],
+    ['full, DPR 1', () => { on('full'); dpr(1); }],
+    [`post off, DPR ${Math.min(1.5, base.dpr)}`, () => { off(); dpr(Math.min(1.5, base.dpr)); }],
+  ];
+  const rows = [];
+  const show = (note) => {
+    out.textContent = `post probe  base DPR ${base.dpr}  ${innerWidth}x${innerHeight}  ${note}\n`
+      + 'setup                     frame ms  gpu ms  submit ms  draws\n'
+      + rows.map(r => `${r.setup.padEnd(26)}${r.frame.toFixed(2).padStart(8)}${r.gpu.toFixed(2).padStart(8)}${r.submit.toFixed(2).padStart(11)}${String(r.draws).padStart(7)}`).join('\n');
+  };
+  try {
+    for (const [setup, apply] of setups) {
+      show(`running: ${setup}`);
+      apply();
+      await wait(settle);
+      const f = [], g = [], s = [], d = [];
+      for (let t = 0; t < sample; t += 250) {
+        await wait(250);
+        f.push(prof.frame); g.push(prof.gpu); s.push(prof.submit); d.push(renderer.info.render.drawCalls);
+      }
+      rows.push({ setup, frame: median(f), gpu: median(g), submit: median(s), draws: median(d) });
+      undo();
+    }
+  } finally {
+    undo();
+    LOOK.enabled = base.enabled;
+    applyLook();
+    postFX?.setMode('full');
+  }
+  show('done');
+  console.table(rows);
+  return rows;
+}
 
 renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -4046,7 +4202,7 @@ renderer.setAnimationLoop(() => {
   syncFish(running ? dt : 0);
   microfauna.update(running ? dt : 0);
   syncFlakes();
-  if (RIPPLE_SETTINGS.enabled) syncBubbleRipplePops(uClock.value);
+  syncBubbleRipplePops(uClock.value);
   const ambientRipple = pollAmbientRipple(rippleAmbient, uClock.value, TANK);
   if (ambientRipple) queueRipple(ambientRipple);
   if (RIPPLE_SETTINGS.enabled) rippleSystem.step(dt, rippleQueue);
@@ -4056,7 +4212,31 @@ renderer.setAnimationLoop(() => {
   const dueShadows = shadowsDue(shadowFrame++, SHADOW_EVERY, { sun: rig.dirLight.castShadow, lamp: lamp.castShadow });
   if (dueShadows.sun) rig.dirLight.shadow.needsUpdate = true;
   if (dueShadows.lamp) lamp.shadow.needsUpdate = true;
-  if (postFX && postFX.enabled) postFX.render();
+  // Once after a precompile: draw the inactive path first, so its first-use costs (targets, output
+  // pass, shadow pipelines at its depth) are paid now, not on the click. The real render overwrites it.
+  if (primeOther) {
+    primeOther = false;
+    if (rig.dirLight.castShadow) rig.dirLight.shadow.needsUpdate = true;
+    if (lamp.castShadow) lamp.shadow.needsUpdate = true;
+    drawnSinceBuild[postFX && postFX.enabled ? 'plain' : 'post'] = true;
+    if (postFX && postFX.enabled) {
+      const tm = renderer.toneMapping;
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.render(scene, camera);
+      renderer.toneMapping = tm;
+    } else {
+      const tm = renderer.toneMapping;
+      ensurePostFX().setToneMapping(LOOK.tone);
+      postFX.render();
+      renderer.toneMapping = tm;
+      postTone = null;
+    }
+    if (dueShadows.sun) rig.dirLight.shadow.needsUpdate = true;
+    if (dueShadows.lamp) lamp.shadow.needsUpdate = true;
+  }
+  const postOn = !!(postFX && postFX.enabled);
+  drawnSinceBuild[postOn ? 'post' : 'plain'] = true;
+  if (postOn) postFX.render();
   else renderer.render(scene, camera);
   if (PROF) {
     const t3 = performance.now();
