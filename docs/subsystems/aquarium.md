@@ -15,6 +15,7 @@ with is a pure module beneath it.
 | `aquarium-growth.js` | duckweed on the water and hair algae on hard surfaces, as plain arrays | pure |
 | `aquarium-plant-batch.js` | packs every plant of one species into one geometry, with the per-plant values as vertex attributes; CPU reference for the batch shader | pure |
 | `aquarium-model-merge.js` | packs a Stadium model's texture tiles into one atlas and its skinned parts into one geometry; CPU reference for the tile sample | pure |
+| `aquarium-look.js` | the Look panel's post-processing settings: defaults (the user's look), limits, and `resolveLookSettings` for a saved `look` block | pure |
 | `aquarium-bubbles.js` | bubbles rising from the sand: where, when, and the CPU reference for the shader | pure |
 | `aquarium-water.js` | underwater optics as TSL, applied per-material | needs three |
 | `aquarium.html` | scene, glass, fish meshes, plants, grass, flakes, feed control, inspector, persistence | — |
@@ -35,7 +36,7 @@ with is a pure module beneath it.
 Tests: `test-aquarium-world.mjs`, `test-aquarium-locomotion.mjs`, `test-aquarium-policy.mjs`, The neural suites are `test-aquarium-neural-config.mjs`, `test-aquarium-neural-runtime.mjs`, `test-aquarium-neural-controller.mjs` and `test-aquarium-neural-integration.mjs`.
 `test-aquarium-scape.mjs`, `test-aquarium-water.mjs`, `test-aquarium-species.mjs`,
 `test-aquarium-stock.mjs`, `test-aquarium-growth.mjs`, `test-aquarium-bubbles.mjs`,
-`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-plant-batch.mjs`, `test-aquarium-model-merge.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
+`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-plant-batch.mjs`, `test-aquarium-model-merge.mjs`, `test-aquarium-look.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
 
 `test-aquarium-stock.mjs` exercises the real `disk-store.js` against a fake `serve.py`, because the
 persistence claim is about the WIRING — what reaches disk and what comes back — not about a shape
@@ -1245,6 +1246,28 @@ surfaces carry it:
   the single strongest cue that the box is full. The level is exactly where `addFlakes` drops a
   flake, so food enters at the surface rather than in mid-air, and it sits above the fish ceiling
   (`TANK.max[1] - wallMargin`) so no fish ever breaches it.
+
+## Look: post-processing
+
+The **Look** section (after Water) runs the whole frame through `post-fx.js`, the same stack
+`environment-viewer.html` uses: scene pass, then bloom, then tone mapping, then grade and vignette.
+
+- Settings live in `LOOK` and save in `aquarium-stock.json` under `look` (`aquarium-look.js`). A file
+  without that block opens with the default look, which is the one the user set on 2026-09-26: post
+  on, neutral tone mapping, exposure 1, bloom 0.1 (radius 0.51, threshold 0.81), contrast 1,
+  saturation 1.22, no temperature shift, no vignette. Reset returns to it.
+- Controls: on/off, tone mapping (none, neutral, aces, agx, reinhard), exposure, bloom strength,
+  radius and threshold, contrast, saturation, temperature and vignette, plus Reset.
+- `createPostFX` is called the first time post is turned on, not at load. The frame loop draws
+  `postFX.render()` when it is on, `renderer.render()` otherwise. `post-fx.js` gained a synchronous
+  `render()` for this, because the loop callback is not async.
+- `post-fx.js` sets `renderer.toneMapping` for its output pass. `applyLook()` puts it back to
+  `NoToneMapping` (exposure 1) when post is turned off, or the plain path would tone-map too.
+- The scene pass takes the renderer's sample count, so antialiasing stays on with post on.
+
+Checked in Chrome 2026-09-26: at the defaults, post on looks the same as post off, draws go from
+96 to 108 (the bloom passes), and the page stays at 56-60 fps. AgX with bloom and vignette visibly
+changes the image, and turning post off restores the plain image and 96 draws.
 
 ## Wind is not current
 

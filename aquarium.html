@@ -186,6 +186,20 @@
       </div>
     </div>
 
+    <div data-group="look">
+      <div class="row"><label><input type="checkbox" id="lookEnabled"> Post-processing</label></div>
+      <div class="row"><label>Tone mapping <select id="lookTone"></select></label></div>
+      <div class="row"><label>Exposure <input id="lookExposure" type="range" min="0.05" max="8" step="0.01"></label><span id="lookExposureVal"></span></div>
+      <div class="row"><label>Bloom <input id="lookBloomStrength" type="range" min="0" max="5" step="0.01"></label><span id="lookBloomStrengthVal"></span></div>
+      <div class="row"><label>Bloom radius <input id="lookBloomRadius" type="range" min="0" max="1" step="0.01"></label><span id="lookBloomRadiusVal"></span></div>
+      <div class="row"><label>Bloom threshold <input id="lookBloomThreshold" type="range" min="0" max="4" step="0.01"></label><span id="lookBloomThresholdVal"></span></div>
+      <div class="row"><label>Contrast <input id="lookContrast" type="range" min="0" max="3" step="0.01"></label><span id="lookContrastVal"></span></div>
+      <div class="row"><label>Saturation <input id="lookSaturation" type="range" min="0" max="3" step="0.01"></label><span id="lookSaturationVal"></span></div>
+      <div class="row"><label>Temperature <input id="lookTemperature" type="range" min="-2" max="2" step="0.01"></label><span id="lookTemperatureVal"></span></div>
+      <div class="row"><label>Vignette <input id="lookVignette" type="range" min="0" max="1" step="0.01"></label><span id="lookVignetteVal"></span></div>
+      <div class="row"><button id="lookReset">Reset</button></div>
+    </div>
+
     <div data-group="size">
       <div class="row"><label>Average <input id="sizeMean" type="range" min="0.02" max="0.2" step="0.001"></label><span id="sizeMeanVal"></span></div>
       <div class="row"><label>Spread <input id="sizeSpread" type="range" min="0" max="1" step="0.01"></label><span id="sizeSpreadVal"></span></div>
@@ -352,6 +366,8 @@ import { readRigFromGLB } from './pokemon-rig.js';
 import { PLANT_PRESETS, buildPlantGeometry, plantTint } from './plants.js';
 import { batchPlants } from './aquarium-plant-batch.js';
 import { packAtlas, tileUV, mergeParts } from './aquarium-model-merge.js';
+import { createPostFX } from './post-fx.js';
+import { LOOK_TONES, resolveLookSettings, lookGrade } from './aquarium-look.js';
 import { createGrass } from './grass.js';
 import { FALLBACK_COLORS } from './terrain-textures.js';
 import { createLightingRig } from './lights.js';
@@ -650,6 +666,8 @@ const WATER_LEVEL = TANK.waterLevel;
 // Bubble centres reach the water plane, dwell there, then pop.
 const BUBBLE_TOP = WATER_LEVEL;
 const RIPPLE_SETTINGS = resolveRippleSettings(null);
+// Post-processing, saved under `look`; off until the Look panel turns it on (aquarium-look.js).
+const LOOK = resolveLookSettings(null);
 const rippleQueue = [];
 let rippleAmbient = createAmbientRippleState(1, 0);
 const rippleSystem = createRippleSystem({ renderer, tank: TANK, settings: RIPPLE_SETTINGS });
@@ -884,6 +902,7 @@ function saveStock() {
     lamp: { ...LAMP },
     microfauna: microfaunaSettings,
     ripples: { ...RIPPLE_SETTINGS },
+    look: { ...LOOK },
     ui: uiState(),
   });
 }
@@ -2673,6 +2692,7 @@ buildGlass();
 
 const saved = store.json(null);
 Object.assign(RIPPLE_SETTINGS, resolveRippleSettings(saved && saved.ripples));
+Object.assign(LOOK, resolveLookSettings(saved && saved.look));
 const startSeed = Number.isFinite(saved && saved.seed) ? saved.seed : 3;
 // An EMPTY saved list is not a saved tank -- a file written before any fish existed would
 // otherwise load as an empty aquarium and stay that way, since the count then reads zero too.
@@ -2738,6 +2758,7 @@ const SECTION_PLAN = [
   ['Light', 'light', null, true],
   ['Lamp', 'lamp', null, true],
   ['Water', 'water', null, true],
+  ['Look', 'look', null, true],
 
   ['Fish size', 'size', 'Fish', true],
   ['Swim speed', 'speed', null, true],
@@ -3363,6 +3384,55 @@ document.getElementById('waterMurky').onclick = () => {
 };
 syncWaterUI();
 
+// ---- Look: post-fx.js over the whole frame ----
+// Built the first time it is turned on. post-fx.js sets renderer.toneMapping for its output pass,
+// so turning it off puts the renderer back to no tone mapping, or the plain path would tone-map too.
+let postFX = null, postTone = null;
+function applyLook() {
+  if (!LOOK.enabled) {
+    if (postFX) postFX.setEnabled(false);
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.toneMappingExposure = 1;
+    postTone = null;
+    return;
+  }
+  if (!postFX) postFX = createPostFX({ renderer, scene, camera, params: { mode: 'full', tone: LOOK.tone } });
+  if (postTone !== LOOK.tone) { postFX.setToneMapping(LOOK.tone); postTone = LOOK.tone; }
+  postFX.setExposure(LOOK.exposure);
+  postFX.setBloom(LOOK.bloomStrength, LOOK.bloomRadius, LOOK.bloomThreshold);
+  postFX.setGrade(lookGrade(LOOK));
+  postFX.setEnabled(true);
+}
+const lookSliders = [
+  ['lookExposure', 'exposure'], ['lookBloomStrength', 'bloomStrength'], ['lookBloomRadius', 'bloomRadius'],
+  ['lookBloomThreshold', 'bloomThreshold'], ['lookContrast', 'contrast'], ['lookSaturation', 'saturation'],
+  ['lookTemperature', 'temperature'], ['lookVignette', 'vignette'],
+];
+const lookToneEl = document.getElementById('lookTone');
+for (const t of LOOK_TONES) lookToneEl.add(new Option(t, t));
+function syncLookUI() {
+  document.getElementById('lookEnabled').checked = LOOK.enabled;
+  lookToneEl.value = LOOK.tone;
+  for (const [id, key] of lookSliders) {
+    document.getElementById(id).value = LOOK[key];
+    document.getElementById(id + 'Val').textContent = LOOK[key].toFixed(2);
+  }
+}
+function setLook(patch) {
+  Object.assign(LOOK, resolveLookSettings({ ...LOOK, ...patch }));
+  applyLook();
+  syncLookUI();
+  saveStock();
+}
+document.getElementById('lookEnabled').onchange = (e) => setLook({ enabled: e.target.checked });
+lookToneEl.onchange = () => setLook({ tone: lookToneEl.value });
+for (const [id, key] of lookSliders) {
+  document.getElementById(id).oninput = (e) => setLook({ [key]: parseFloat(e.target.value) });
+}
+document.getElementById('lookReset').onclick = () => setLook(resolveLookSettings({ enabled: LOOK.enabled }));
+applyLook();
+syncLookUI();
+
 const rippleSliders = [
   ['rippleStrength', 'strength', v => v.toFixed(2) + '×'],
   ['rippleDamping', 'damping', v => v.toFixed(2) + '/s'],
@@ -3986,7 +4056,8 @@ renderer.setAnimationLoop(() => {
   const dueShadows = shadowsDue(shadowFrame++, SHADOW_EVERY, { sun: rig.dirLight.castShadow, lamp: lamp.castShadow });
   if (dueShadows.sun) rig.dirLight.shadow.needsUpdate = true;
   if (dueShadows.lamp) lamp.shadow.needsUpdate = true;
-  renderer.render(scene, camera);
+  if (postFX && postFX.enabled) postFX.render();
+  else renderer.render(scene, camera);
   if (PROF) {
     const t3 = performance.now();
     prof.sim = ema(prof.sim, t1 - t0);
