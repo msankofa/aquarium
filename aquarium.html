@@ -351,6 +351,7 @@ import {
 import { readRigFromGLB } from './pokemon-rig.js';
 import { PLANT_PRESETS, buildPlantGeometry, plantTint } from './plants.js';
 import { batchPlants } from './aquarium-plant-batch.js';
+import { packAtlas, tileUV, mergeParts } from './aquarium-model-merge.js';
 import { createGrass } from './grass.js';
 import { FALLBACK_COLORS } from './terrain-textures.js';
 import { createLightingRig } from './lights.js';
@@ -440,6 +441,8 @@ rig.dirLight.shadow.mapSize.set(2048, 2048);
 const SHADOW_EVERY = Math.max(1, Math.round(Number(new URLSearchParams(location.search).get('shadowEvery'))) || 2);
 // One mesh per plant species; `?plantBatch=0` keeps one mesh per plant for an A/B.
 const PLANT_BATCH = new URLSearchParams(location.search).get('plantBatch') !== '0';
+// One skinned mesh per Stadium model; `?modelMerge=0` keeps its separate parts for an A/B.
+const MODEL_MERGE = new URLSearchParams(location.search).get('modelMerge') !== '0';
 rig.dirLight.shadow.autoUpdate = false;
 let shadowFrame = 0;
 
@@ -1675,7 +1678,9 @@ function tankMaterialFor(src, body) {
   mat.alphaTest = src.alphaTest > 0 ? src.alphaTest : 0.5;
   const tint = vec3(src.color?.r ?? 1, src.color?.g ?? 1, src.color?.b ?? 1);
   if (src.map) {
-    const tex = texture(src.map, uv());
+    // A merged model samples its part's tile: xy + clamp(uv, 0, 1) * wh (aquarium-model-merge.js).
+    const tile = src.userData.atlas ? attribute('aAtlas', 'vec4') : null;
+    const tex = texture(src.map, tile ? tile.xy.add(uv().clamp(0, 1).mul(tile.zw)) : uv());
     // vec4, not vec3: `alphaTest` compares the diffuse alpha, and a vec3 colorNode pads it with 1,
     // so every cut-out fin would render as an opaque rectangle.
     mat.colorNode = vec4(tankColor(tex.rgb.mul(tint)), tex.a);
@@ -1871,11 +1876,8 @@ async function loadModels(stock) {
         o.castShadow = true;
         o.receiveShadow = true;
       });
-      // The template keeps its GLTFLoader materials and is never drawn. Materials are built per
-      // FISH at clone time, because the deformation needs this animal's own phase, beat amplitude
-      // and turn -- and a uniform belongs to one material. Six fish of 4-16 materials each is worth
-      // it; sharing them would mean every Goldeen in the tank beating in lockstep with every other.
-      // The textures, which are the expensive part, are shared: only the wrappers multiply.
+      // The template keeps its GLTFLoader materials and is never drawn. Tank materials are built
+      // once per species at clone time (`speciesMaterials`); each fish's beat reaches them per draw.
       let clip = (gltf.animations || []).find(c => /^idle$/i.test(c.name)) || gltf.animations?.[0] || null;
       let bounds = { extent, centre, noseZ: mx.z };
 
@@ -1901,6 +1903,7 @@ async function loadModels(stock) {
       // layout says which bones carry the wave and how "up" reads inside each of them, and a record
       // from before it was baked has none -- that animal still swims, on the fish shader's wave.
       const spine = straight ? spineLayout(straight) : null;
+      if (MODEL_MERGE) mergeModelParts(gltf.scene, species);
       modelCache.set(species, { template: gltf.scene, clip, spine, ...bounds });
     } catch (err) {
       console.warn(`[aquarium] ${species} did not load, drawing it as a procedural fish:`, err.message);
@@ -1936,6 +1939,85 @@ function applyModelLook(r) {
   // are authored standing on a battle floor, so an uncentred one hangs above or below its own goal.
   // The offset is rotated with the model, or turning one would swing it off its own goal point.
   r.model.position.copy(r.entry.centre).multiplyScalar(-scale).applyEuler(r.model.rotation);
+}
+
+/**
+ * Replace a template's skinned parts with ONE skinned mesh and one texture atlas, so each clone is
+ * one draw (plus its shadow) instead of 4-25. Only when every part shares a skeleton, bind pose,
+ * transform and material settings; otherwise the template is left as it was and the reason logged.
+ * The packing and the arrays are `aquarium-model-merge.js`.
+ */
+function mergeModelParts(root, species) {
+  const parts = [];
+  root.traverse((o) => { if (o.isMesh) parts.push(o); });
+  if (parts.length < 2) return false;
+  const first = parts[0], m0 = first.material;
+  const keys = 'normal,position,skinIndex,skinWeight,uv';
+  const why = parts.every(p => p.isSkinnedMesh) ? parts.find((p) => {
+    const m = p.material;
+    return Array.isArray(m) || p.parent !== first.parent || !p.matrix.equals(first.matrix)
+      || !p.bindMatrix.equals(first.bindMatrix) || p.skeleton.bones.some((b, i) => b !== first.skeleton.bones[i])
+      || Object.keys(p.geometry.attributes).sort().join() !== keys || Object.keys(p.geometry.morphAttributes).length
+      || !p.geometry.index || m.transparent || m.alphaTest !== m0.alphaTest || m.roughness !== m0.roughness
+      || !m.color.equals(m0.color) || (m.map && (m.map.wrapS !== THREE.ClampToEdgeWrapping
+      || m.map.wrapT !== THREE.ClampToEdgeWrapping || m.map.flipY || m.map.channel !== 0));
+  }) : first;
+  if (why) { console.info(`[aquarium] ${species}: parts not merged (${why.name || 'a part'} differs)`); return false; }
+
+  // One tile per distinct texture, and one white tile for the parts that have none.
+  const images = new Map();
+  for (const p of parts) if (p.material.map && !images.has(p.material.map)) images.set(p.material.map, images.size);
+  const white = images.size;
+  const sizes = [...images.keys()].map(t => ({ w: t.image.width, h: t.image.height }));
+  sizes.push({ w: 2, h: 2 });
+  const atlas = packAtlas(sizes);
+  const canvas = document.createElement('canvas');
+  canvas.width = atlas.width; canvas.height = atlas.height;
+  const ctx = canvas.getContext('2d');
+  for (const [tex, i] of images) ctx.drawImage(tex.image, atlas.rects[i].x, atlas.rects[i].y);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(atlas.rects[white].x, atlas.rects[white].y, 2, 2);
+  const some = [...images.keys()][0];
+  const map = new THREE.CanvasTexture(canvas);
+  map.flipY = false;
+  map.colorSpace = some ? some.colorSpace : THREE.SRGBColorSpace;
+  map.magFilter = some ? some.magFilter : THREE.LinearFilter;
+  map.minFilter = some ? some.minFilter : THREE.LinearFilter;
+  map.generateMipmaps = false;
+  map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
+
+  // De-quantised copies: glTF may store any of these normalised.
+  const plain = (a, n) => { const out = new Float32Array(a.count * n); for (let i = 0; i < a.count; i++) for (let c = 0; c < n; c++) out[i * n + c] = a.getComponent(i, c); return out; };
+  const merged = mergeParts(parts.map((p) => {
+    const g = p.geometry.attributes;
+    const i = p.material.map ? images.get(p.material.map) : white;
+    return {
+      position: plain(g.position, 3), normal: plain(g.normal, 3), uv: plain(g.uv, 2),
+      skinIndex: plain(g.skinIndex, 4), skinWeight: plain(g.skinWeight, 4),
+      index: p.geometry.index.array, tile: tileUV(atlas.rects[i], atlas.width, atlas.height),
+    };
+  }));
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(merged.position, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(merged.normal, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(merged.uv, 2));
+  geo.setAttribute('skinIndex', new THREE.BufferAttribute(merged.skinIndex, 4));
+  geo.setAttribute('skinWeight', new THREE.BufferAttribute(merged.skinWeight, 4));
+  geo.setAttribute('aAtlas', new THREE.BufferAttribute(merged.aAtlas, 4));
+  geo.setIndex(new THREE.BufferAttribute(merged.index, 1));
+
+  const mat = m0.clone();
+  mat.map = map;
+  mat.userData.atlas = true;
+  const mesh = new THREE.SkinnedMesh(geo, mat);
+  mesh.name = `${species}-merged`;
+  mesh.position.copy(first.position); mesh.quaternion.copy(first.quaternion); mesh.scale.copy(first.scale);
+  mesh.frustumCulled = false; mesh.castShadow = first.castShadow; mesh.receiveShadow = first.receiveShadow;
+  mesh.bind(first.skeleton, first.bindMatrix);
+  first.parent.add(mesh);
+  for (const p of parts) p.removeFromParent();
+  console.info(`[aquarium] ${species}: ${parts.length} parts merged, atlas ${atlas.width}x${atlas.height}`);
+  return true;
 }
 
 /** One model fish: a cloned skeleton, its own mixer, and a holder that carries the world offsets. */

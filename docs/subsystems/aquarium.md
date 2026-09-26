@@ -14,6 +14,7 @@ with is a pure module beneath it.
 | `aquarium-current.js` | the water current model; CPU reference for the page's TSL twin | pure |
 | `aquarium-growth.js` | duckweed on the water and hair algae on hard surfaces, as plain arrays | pure |
 | `aquarium-plant-batch.js` | packs every plant of one species into one geometry, with the per-plant values as vertex attributes; CPU reference for the batch shader | pure |
+| `aquarium-model-merge.js` | packs a Stadium model's texture tiles into one atlas and its skinned parts into one geometry; CPU reference for the tile sample | pure |
 | `aquarium-bubbles.js` | bubbles rising from the sand: where, when, and the CPU reference for the shader | pure |
 | `aquarium-water.js` | underwater optics as TSL, applied per-material | needs three |
 | `aquarium.html` | scene, glass, fish meshes, plants, grass, flakes, feed control, inspector, persistence | — |
@@ -34,7 +35,7 @@ with is a pure module beneath it.
 Tests: `test-aquarium-world.mjs`, `test-aquarium-locomotion.mjs`, `test-aquarium-policy.mjs`, The neural suites are `test-aquarium-neural-config.mjs`, `test-aquarium-neural-runtime.mjs`, `test-aquarium-neural-controller.mjs` and `test-aquarium-neural-integration.mjs`.
 `test-aquarium-scape.mjs`, `test-aquarium-water.mjs`, `test-aquarium-species.mjs`,
 `test-aquarium-stock.mjs`, `test-aquarium-growth.mjs`, `test-aquarium-bubbles.mjs`,
-`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-plant-batch.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
+`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-plant-batch.mjs`, `test-aquarium-model-merge.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
 
 `test-aquarium-stock.mjs` exercises the real `disk-store.js` against a fake `serve.py`, because the
 persistence claim is about the WIRING — what reaches disk and what comes back — not about a shape
@@ -1660,6 +1661,42 @@ checked by eye that they swim out of step.
 `?prof=1` now prints `materials fish N` and sets `window.aquariumProf.fishMeshes()` for console
 probing.
 
+### One mesh per model fish
+
+Each Stadium GLB arrives as 4-25 skinned parts, one texture each, and every part was its own draw
+(twice, with shadows). On load, `mergeModelParts(gltf.scene, species)` replaces the template's parts
+with one `SkinnedMesh`, so every clone of it is one draw. Everything after that (materials, swim
+deformation, serpent bones, the mixer) runs on the merged mesh unchanged.
+
+- It merges only when every part shares one skeleton's bones, bind matrix, parent and transform, has
+  exactly `position, normal, uv, skinIndex, skinWeight`, no morph targets, one material, and the same
+  colour, roughness and alpha test. Textures must clamp at the edges with no flip. Anything else
+  keeps its parts and logs `parts not merged`. All 11 species on the saved tank pass (probed in the
+  browser 2026-09-26).
+- The parts' textures are packed into one canvas atlas (`packAtlas`, power-of-two, shelf packing),
+  with a 2x2 white tile for parts without a texture. The largest source texture is 128 px, so an
+  atlas stays around 256 px.
+- The parts' UVs run past 0..1 (Gyarados reaches -0.78..5.25) and their textures clamp. So each
+  vertex carries its tile as `aAtlas` (x, y, w, h) and `tankMaterialFor` samples
+  `xy + clamp(uv, 0, 1) * wh`, per fragment. The tile is inset to its edge texels' centres, which is
+  where ClampToEdge samples, so linear filtering never reaches a neighbour tile.
+- Attributes are copied through `getComponent`, so quantised glTF data comes out as plain floats.
+- `?modelMerge=0` keeps the parts, for an A/B check.
+
+Known side effect: a canvas stores premultiplied colour, so texels with zero alpha lose their colour
+in the atlas. Cut-out fin edges may be a shade darker where linear filtering blends into them.
+
+Measured 2026-09-26 in Chrome, saved tank (18 fish, 11 species), five 1.5 s samples each:
+
+| | fish meshes | draws | submit ms | frame |
+|---|---|---|---|---|
+| `?modelMerge=0` | 203 | 466 | 14.6-21.2 | 42-56 fps |
+| merged | 18 | 96 | 3.2-4.0 | 60 fps (vsync) |
+
+Close-up screenshots of Dratini, Tentacruel, Magikarp and Staryu show their textures in the right
+places. `test-aquarium-model-merge.mjs` covers the packing, the clamp to edge texel centres and the
+merged arrays. The atlas material compiles headlessly.
+
 ### The pose is state, not a look-at
 
 `syncFish` keeps a damped yaw, pitch and roll per fish and measures **the rate the animal is actually
@@ -2164,8 +2201,8 @@ The key light's shadow map is therefore refreshed every second frame (`shadow.au
 `needsUpdate` set on the Nth frame), which a fish and a swaying plant cannot show. `?shadowEvery=1`
 restores every frame for an A/B; the readout prints the current value and the mesh counts for fish,
 plants and hardscape. With `shadowEvery 2` on the same tank: submit 11.96 -> 8.45 ms, GPU 4.54 ms, still 60 fps. The draws figure is one frame's count (186 on a frame with no shadow pass, about twice that on one with), not an average. Meshes: fish 121, plants 41, hardscape 16. Plants are now one mesh per species (2026-09-26, see "One draw per plant species" for the
-measured before and after). Model fish share materials per species (see "A species shares its
-materials"). Fish are now most of the draws: 203 meshes, about 400 of 466 draws with the shadow pass.
+measured before and after). Model fish share materials per species and draw as one mesh each (see "One mesh per model
+fish"): 96 draws on the saved tank, down from 580 before plant batching.
 
 `resizeRenderer` re-reads `devicePixelRatio`, so moving the window between screens re-sharpens it.
 
