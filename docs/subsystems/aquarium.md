@@ -13,6 +13,7 @@ with is a pure module beneath it.
 | `aquarium-scape.js` | bed heightfield, hardscape entities, plant placement | pure |
 | `aquarium-current.js` | the water current model; CPU reference for the page's TSL twin | pure |
 | `aquarium-growth.js` | duckweed on the water and hair algae on hard surfaces, as plain arrays | pure |
+| `aquarium-plant-batch.js` | packs every plant of one species into one geometry, with the per-plant values as vertex attributes; CPU reference for the batch shader | pure |
 | `aquarium-bubbles.js` | bubbles rising from the sand: where, when, and the CPU reference for the shader | pure |
 | `aquarium-water.js` | underwater optics as TSL, applied per-material | needs three |
 | `aquarium.html` | scene, glass, fish meshes, plants, grass, flakes, feed control, inspector, persistence | — |
@@ -33,7 +34,7 @@ with is a pure module beneath it.
 Tests: `test-aquarium-world.mjs`, `test-aquarium-locomotion.mjs`, `test-aquarium-policy.mjs`, The neural suites are `test-aquarium-neural-config.mjs`, `test-aquarium-neural-runtime.mjs`, `test-aquarium-neural-controller.mjs` and `test-aquarium-neural-integration.mjs`.
 `test-aquarium-scape.mjs`, `test-aquarium-water.mjs`, `test-aquarium-species.mjs`,
 `test-aquarium-stock.mjs`, `test-aquarium-growth.mjs`, `test-aquarium-bubbles.mjs`,
-`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
+`test-aquarium-obstacles.mjs`, `test-aquarium-plant-collision.mjs`, `test-aquarium-plant-batch.mjs`, `test-aquarium-grass.mjs`. Plain Node, no framework.
 
 `test-aquarium-stock.mjs` exercises the real `disk-store.js` against a fake `serve.py`, because the
 persistence claim is about the WIRING — what reaches disk and what comes back — not about a shape
@@ -44,6 +45,7 @@ rather than swallowed — the difference between "save again" and "lost".
 
 Design: `docs/superpowers/specs/2026-09-18-aquarium-jev-design.md`.
 Build plan and its deviations: `docs/superpowers/plans/2026-09-18-aquarium-tank.md`.
+Roadmap (sound, art direction, UI, performance): `docs/aquarium-roadmap/roadmap.md`.
 
 Run it with `python serve.py 8080`, then `http://127.0.0.1:8080/aquarium.html`.
 
@@ -1279,6 +1281,39 @@ Plants are `buildPlantGeometry` per placement, scaled to fit a per-species budge
 (`aquarium-scape.js`) — the builder works in units where a plant is roughly a metre tall and a tank
 is half a metre deep.
 
+### One draw per plant species
+
+`buildPlants()` used to make one mesh and one material per plant: 41 draws, 82 with the shadow pass.
+It now builds each plant as before, places it as before, then hands every plant's arrays to
+`batchPlants()` (`aquarium-plant-batch.js`). That returns one geometry per species.
+
+- Positions stay in each plant's own frame, because the sway maths works there.
+- The seven per-plant uniforms became vertex attributes: `aTint`, `aPlant` (height, lean, sway,
+  roll), `aOrigin` (x, bed y, z) and `aRot` (cos, sin of `rotationY`).
+- Normals are turned into world space in the batch, since the batch mesh has no rotation.
+- `plantMaterial()` builds both paths from one graph. With `batch` set, `positionNode` returns world
+  space; without it, the plant's own frame as before. The glass clamp and the leaf-clamp toggle
+  work the same in both.
+- The batch mesh has `frustumCulled = false`: its positions are plant-local, so a computed bounding
+  volume would be wrong, and it spans the tank anyway.
+- `?plantBatch=0` builds the old one-mesh-per-plant path, for an A/B check.
+
+`test-aquarium-plant-batch.mjs` checks the packing and that, at zero sway, a batched vertex and
+normal land where the old mesh's transform put them (worst 1e-8 m). The batched graph compiles
+headlessly (`scratchpads/aquarium/tsl-compile-check.mjs`).
+
+Measured 2026-09-26 in Chrome through `?prof=1`, on the saved tank (18 fish, 203 fish meshes, 60 plants,
+16 hardscape), five 1.5 s samples each, the tab visible:
+
+| | plant meshes | draws | frame ms | GPU ms | submit ms |
+|---|---|---|---|---|---|
+| `?plantBatch=0` | 60 | 580 | 27-34 | 13.9-18.5 | 17-24 |
+| batched | 3 | 466 | 20-29 | 6.8-10.4 | 13-24 |
+
+Draws fell by 114, which is the 57 plant meshes saved, twice for the shadow pass. Submit time is noisy
+and overlaps between the two. Fish are now most of the draws. In a screenshot, the batched plants
+stand where they did, show their tint variation, and cast shadows on the sand.
+
 **The budget is a height AND a radius, and the position is clamped by that radius.** Scaling by
 height alone let vallisneria, which was 2.6x wider than tall, grow straight out through the front
 pane. Three things were wrong and all three had to be fixed:
@@ -1601,12 +1636,29 @@ attribute; a GLB has no such thing, so it is measured off the model's world boun
 wildly different scales — Goldeen is 29 units nose to tail and Gyarados 209 — and an absolute offset
 is a twitch on one and a hairpin on the other.
 
-### A model fish owns its materials
+### A species shares its materials; each fish keeps its own beat
 
-It has to. A uniform belongs to one material, and the deformation needs *this* animal's phase, beat
-and turn; sharing a species' materials would mean every Goldeen in the tank beating in lockstep. The
-textures, which are the expensive part, stay shared — only the wrappers multiply, and
-`disposeFishMaterials` disposes exactly what a fish owns and nothing the template lends it.
+Until 2026-09-26 every model fish owned its materials, because a plain uniform belongs to one
+material and the deformation needs *this* animal's phase, beat and turn. Now a species' fish share
+one set (`speciesMaterials(entry)`, keyed by the template's source material). The four swim uniforms
+come from `sharedSwimBody(entry)` and are `uniform(...).onObjectUpdate(...)`. Each one reads
+`object.userData.swimBody` off the mesh being drawn, so fish of one species still bend on their own
+beat, and the shadow pass reads the same values.
+
+- `buildModelFish` gives each fish a plain `body` (`uPhase`, `uAmp`, `uCurve`, `uTwist`, each a
+  `{ value }`). `syncFish` writes it as before, and every mesh of the model points at it.
+- `disposeFishMaterials` no longer frees model materials, since a removed fish's species may still
+  be in the tank. `clearFish` frees them all through `disposeModelMaterials()`.
+- Textures and geometry stay the template's, as before.
+
+Measured in Chrome on the saved tank (18 fish, 11 species, 203 fish meshes): fish materials went
+from 203 to 131. Only Magikarp (3 fish) and Kabuto (6) have more than one animal, so that is where
+the saving is. Draw calls stayed at 466, as expected: sharing materials does not merge meshes. In the
+page, two Magikarp share material instances and have different `uPhase` values. Nobody has yet
+checked by eye that they swim out of step.
+
+`?prof=1` now prints `materials fish N` and sets `window.aquariumProf.fishMeshes()` for console
+probing.
 
 ### The pose is state, not a look-at
 
@@ -1848,21 +1900,8 @@ surface, not replacing it.
 
 ## Caustics
 
-> **KNOWN BROKEN, as of 2026-09-19: the caustic does not animate.** Reported from the page, and the
-> same effect is reported to have disappeared from Base Game some time earlier — so this is a
-> pre-existing fault in shared code, not something the tank introduced, and it was already broken
-> when this was built on top of it. Under investigation elsewhere; nothing below should be read as
-> describing working behaviour.
->
-> Ruled out so far, by measurement rather than reading: the wave table is fine (all 14 waves carry
-> non-zero omega, 1.131 rad/s, and those values reach `profile.waveB.array`), and the CPU law is
-> fine (`sampleWaves` moves a surface normal 0.033 over one second). So the fault is in GPU
-> evaluation, not in the data or the maths.
->
-> **The observation that would halve the search**, for whoever picks it up: does the water *surface*
-> ripple while the caustic sits still? They read the same `waveNormalFold` off the same profile with
-> the same `uTime`. Surface moving and caustic static points at the caustic node; neither moving
-> points at `uTime` never reaching the profile, which would explain Base Game too.
+> **Fixed.** Marked broken (not animating) on 2026-09-19; the user has since confirmed the caustics
+> work.
 
 **The caustic only lights surfaces that face into the beam** (2026-09-20). Brightness is multiplied
 by `saturate(dot(normalWorld, -r1))`, the cosine at the receiving surface. The law inherited from
@@ -2124,8 +2163,9 @@ alone. Draw calls are: every mesh, twice, because the shadow pass redraws each c
 The key light's shadow map is therefore refreshed every second frame (`shadow.autoUpdate = false`,
 `needsUpdate` set on the Nth frame), which a fish and a swaying plant cannot show. `?shadowEvery=1`
 restores every frame for an A/B; the readout prints the current value and the mesh counts for fish,
-plants and hardscape. With `shadowEvery 2` on the same tank: submit 11.96 -> 8.45 ms, GPU 4.54 ms, still 60 fps. The draws figure is one frame's count (186 on a frame with no shadow pass, about twice that on one with), not an average. Meshes: fish 121, plants 41, hardscape 16. Still open, in order of size: merge the 41 plant meshes (each has its own
-material and three per-plant uniforms), and the model fish, which own 4-16 materials each.
+plants and hardscape. With `shadowEvery 2` on the same tank: submit 11.96 -> 8.45 ms, GPU 4.54 ms, still 60 fps. The draws figure is one frame's count (186 on a frame with no shadow pass, about twice that on one with), not an average. Meshes: fish 121, plants 41, hardscape 16. Plants are now one mesh per species (2026-09-26, see "One draw per plant species" for the
+measured before and after). Model fish share materials per species (see "A species shares its
+materials"). Fish are now most of the draws: 203 meshes, about 400 of 466 draws with the shadow pass.
 
 `resizeRenderer` re-reads `devicePixelRatio`, so moving the window between screens re-sharpens it.
 
@@ -2136,26 +2176,17 @@ authors compiles headlessly through `tsl-build-check.mjs` (`scratchpads/aquarium
 is the harness); grass is the one gap, because `grass.js` builds its blade atlas through `document`
 and cannot run in Node.
 
-The Pokemon roster has never been rendered. What is verified is that the six files load, measure and
-serve (`test-aquarium-species.mjs`, 19 checks over the real GLBs), and that their materials compile
-headlessly (`scratchpads/aquarium/tsl-compile-check.mjs`). Whether a Stadium `idle` clip reads as
-swimming or as hovering, whether the +Z facing guess is right, and what six skinned models do to
-the frame rate are all things only the tank can say.
+**Seen in the browser, many times, as of 2026-09-26.** The user has looked at the tank throughout
+development and sent screenshots; the work history (habits, perching, cave collision, plant and grass
+collision, ripples, micro fauna) was driven by what they saw. Confirmed by the user: caustics work,
+the Pokemon roster renders, and the cave, perching and grass have been looked at and reworked.
+Collision works but still needs work. Earlier fixes found by looking: fish swam backwards
+(`Object3D.lookAt` aims +Z, not -Z), and the tank had no visible water.
 
-**Seen twice, with several rounds of fixes.** Confirmed by eye: plants read as aquatic. Fixed after
-looking: fish swam backwards (`Object3D.lookAt` aims +Z, not -Z), and the tank had no visible water
-— dead clarity constant, `DoubleSide` glass washing the frame, and no surface at all.
+`javaMoss` is settled and cut — see the plants section.
 
-`javaMoss` is settled and cut — see the plants section; that one did not need eyes.
-
-Plant and grass collision (2026-09-22) is tested in Node and not yet seen: whether the grass reads as
-grass at a 10 mm lean, whether the 47 mm bare strip at each end pane looks wrong, and whether the
-moved plants still read as a planted tank.
-
-Still unverified: whether the water now reads, the cave being somewhere a fish visibly arrives, the
-grass carpet, fish passing through rock or wood, and whether the species habits look right — do
-Shellder and Staryu settle *on* the rocks, does Tentacool hold high water, and do fish now rest
-visibly without reading as sluggish.
+Older "not yet seen" or "unseen" notes elsewhere in this doc are stale: the user's reports in chat
+are the record, and they were not always copied here.
 
 ## Neural observability, comparison, and virtual assays (2026-09-21)
 

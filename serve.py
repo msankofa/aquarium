@@ -20,7 +20,10 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 # path -> (mtime, size, text) for /api/code-corpus; keyed on mtime so an edited file is re-read.
 _CORPUS_CACHE = {}
 os.chdir(ROOT)
-port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+_ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
+port = int(_ARGS[0]) if _ARGS else 8080
+# --lan listens on every interface so a headset or phone on the same network can load pages.
+BIND = '0.0.0.0' if '--lan' in sys.argv[1:] else '127.0.0.1'
 
 FAMILIES_DIR = os.path.join(ROOT, 'families')
 PLANT_FAMILIES_DIR = os.path.join(ROOT, 'plant-families')
@@ -532,7 +535,7 @@ def append_self_portrait_made(body_bytes):
     body = json.loads(body_bytes.decode('utf-8'))
     if not isinstance(body, dict):
         raise ValueError('expected a JSON object')
-    effects = {'made', 'lit', 'doused', 'melted', 'struck', 'removed'}
+    effects = {'made', 'lit', 'doused', 'melted', 'struck', 'removed', 'cleared', 'moved', 'resized', 'turned', 'undone', 'used', 'sky', 'fog'}
     effect = str(body.get('effect', 'made'))
     if effect not in effects:
         raise ValueError('unknown effect')
@@ -1793,8 +1796,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 # the port: on Windows the reuse-address flag lets a second serve.py bind beside it, and the browser
 # then keeps reaching the stale process (found 2026-09-08).
 if __name__ == '__main__':
+    if BIND != '127.0.0.1':
+        print('--lan: every device on this network can load pages and use the write and proxy routes.', flush=True)
     http.server.test(
         HandlerClass=Handler,
         port=port,
-        bind="127.0.0.1",
+        bind=BIND,
     )

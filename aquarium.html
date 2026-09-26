@@ -350,6 +350,7 @@ import {
 // size for a Stadium model is the one read out of the file's own skinned vertices.
 import { readRigFromGLB } from './pokemon-rig.js';
 import { PLANT_PRESETS, buildPlantGeometry, plantTint } from './plants.js';
+import { batchPlants } from './aquarium-plant-batch.js';
 import { createGrass } from './grass.js';
 import { FALLBACK_COLORS } from './terrain-textures.js';
 import { createLightingRig } from './lights.js';
@@ -437,6 +438,8 @@ scene.add(rig.dirLight.target);
 rig.dirLight.shadow.mapSize.set(2048, 2048);
 // The shadow pass redraws every caster, so it is roughly half the draw calls; refresh it every Nth frame. ?shadowEvery=1 restores every frame.
 const SHADOW_EVERY = Math.max(1, Math.round(Number(new URLSearchParams(location.search).get('shadowEvery'))) || 2);
+// One mesh per plant species; `?plantBatch=0` keeps one mesh per plant for an A/B.
+const PLANT_BATCH = new URLSearchParams(location.search).get('plantBatch') !== '0';
 rig.dirLight.shadow.autoUpdate = false;
 let shadowFrame = 0;
 
@@ -1391,6 +1394,7 @@ function buildPlants() {
   scape.plants = placed.map((q) => ({ ...built[q.index].p, position: [q.x, q.y, q.z] }));
 
   const leafClamp = collision.leafClamp;
+  const batched = PLANT_BATCH ? [] : null;
   for (const q of placed) {
     const { p, geo, height } = built[q.index];
     const cx = q.x, cz = q.z;
@@ -1399,53 +1403,24 @@ function buildPlants() {
     // data rather than a bypass that happens to be unused. plantTint is the same law plants-gpu.js
     // mirrors -- this is not a third copy, it is a call to the canonical one.
     const tint = plantTint(p.variation.hue, p.variation.dryness, p.variation.age);
-    const uTint = uniform(new THREE.Vector3(tint[0], tint[1], tint[2]));
-
-    const uHeight = uniform(height, 'float');
-    const uLean = uniform(p.lean, 'float');       // metres at the tip, in the plant's own frame
-    const uSway = uniform(p.sway, 'float');
-    const uPlantXZ = uniform(new THREE.Vector2(cx, cz));
-    const uRoll = uniform(p.phase, 'float');      // this plant's 0..1 draw; `sync` decides what it buys
-    const look = currentUniformsFor(p.species);
-
-    const mat = new MeshLambertNodeMaterial({ side: THREE.DoubleSide });
-    mat.colorNode = tankColor(attribute('color', 'vec3').mul(uTint));
-    // The sway happens along a WORLD direction, because a current has one direction and everything
-    // standing in it leans the same way. The mesh is spun by its own `rotationY`, so the world
-    // heading has to be turned back into the plant's frame or each plant drifts its own way --
-    // which is what a breeze looks like, not water.
-    //
-    // R(-theta) applied to the heading. With heading (1, 0) this is the (cos, sin) the previous
-    // version hard-coded, so it is the same law generalised to a heading that can be steered.
-    const uRot = uniform(new THREE.Vector2(Math.cos(p.rotationY), Math.sin(p.rotationY)));
-    mat.positionNode = Fn(() => {
-      const h = positionLocal.y.div(uHeight);
-      // How far down the flow this plant stands. THE ONLY thing its phase may depend on -- a
-      // per-plant random phase is what had neighbours leaning opposite ways.
-      const downstream = dot(uPlantXZ, uCurHeading);
-      const offset = currentOffsetNode(
-        downstream, h, uClock.add(uRoll.mul(uCurSyncSpan)),
-        look.sway, look.rate, look.stiffness,
-      ).mul(uSway);
-      const axis = vec2(
-        uCurHeading.x.mul(uRot.x).sub(uCurHeading.y.mul(uRot.y)),
-        uCurHeading.x.mul(uRot.y).add(uCurHeading.y.mul(uRot.x)),
-      );
-      const lx = positionLocal.x.add(offset.mul(axis.x)).add(uLean.mul(h.clamp(0, 1).pow(1.5)));
-      const lz = positionLocal.z.add(offset.mul(axis.y));
-      // Backstop for the live current sliders, which re-place nothing: hold the swayed vertex
-      // inside the glass. Placement already clears it at the settings the tank was built at.
-      const wx = lx.mul(uRot.x).add(lz.mul(uRot.y)).add(uPlantXZ.x)
-        .clamp(TANK.min[0] + 0.001, TANK.max[0] - 0.001).sub(uPlantXZ.x);
-      const wz = lx.mul(uRot.y).negate().add(lz.mul(uRot.x)).add(uPlantXZ.y)
-        .clamp(TANK.min[2] + 0.001, TANK.max[2] - 0.001).sub(uPlantXZ.y);
-      // Toggle off builds the shader without the clamp at all, so its cost can be measured.
-      if (!leafClamp) return vec3(lx, positionLocal.y, lz);
-      return vec3(wx.mul(uRot.x).sub(wz.mul(uRot.y)), positionLocal.y, wx.mul(uRot.y).add(wz.mul(uRot.x)));
-    })();
-
-    const caustic = causticEmissive();
-    if (caustic) mat.emissiveNode = caustic;
+    if (batched) {
+      batched.push({
+        species: p.species, position: geo.attributes.position.array, normal: geo.attributes.normal.array,
+        color: geo.attributes.color.array, origin: [cx, q.y, cz], rotationY: p.rotationY, tint,
+        height, lean: p.lean, sway: p.sway, roll: p.phase,
+      });
+      geo.dispose();
+      continue;
+    }
+    const mat = plantMaterial(p.species, {
+      tint: uniform(new THREE.Vector3(tint[0], tint[1], tint[2])),
+      height: uniform(height, 'float'),
+      lean: uniform(p.lean, 'float'),       // metres at the tip, in the plant's own frame
+      sway: uniform(p.sway, 'float'),
+      xz: uniform(new THREE.Vector2(cx, cz)),
+      roll: uniform(p.phase, 'float'),      // this plant's 0..1 draw; `sync` decides what it buys
+      rot: uniform(new THREE.Vector2(Math.cos(p.rotationY), Math.sin(p.rotationY))),
+    }, leafClamp, false);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(cx, q.y, cz);
     mesh.rotation.y = p.rotationY;
@@ -1453,7 +1428,83 @@ function buildPlants() {
     mesh.receiveShadow = true;
     plantGroup.add(mesh);
   }
+  // One mesh per species: the per-plant values ride on every vertex (aquarium-plant-batch.js).
+  if (batched) {
+    for (const b of batchPlants(batched)) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(b.position, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(b.normal, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(b.color, 3));
+      geo.setAttribute('aTint', new THREE.BufferAttribute(b.aTint, 3));
+      geo.setAttribute('aPlant', new THREE.BufferAttribute(b.aPlant, 4));
+      geo.setAttribute('aOrigin', new THREE.BufferAttribute(b.aOrigin, 3));
+      geo.setAttribute('aRot', new THREE.BufferAttribute(b.aRot, 2));
+      geo.setIndex(new THREE.BufferAttribute(b.index, 1));
+      const plant = attribute('aPlant', 'vec4');
+      const origin = attribute('aOrigin', 'vec3');
+      const mat = plantMaterial(b.species, {
+        tint: attribute('aTint', 'vec3'), height: plant.x, lean: plant.y, sway: plant.z, roll: plant.w,
+        xz: origin.xz, y: origin.y, rot: attribute('aRot', 'vec2'),
+      }, leafClamp, true);
+      const mesh = new THREE.Mesh(geo, mat);
+      // Positions are stored in each plant's own frame, so a bounding volume computed from them is
+      // wrong; the batch spans the tank anyway.
+      mesh.frustumCulled = false;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      plantGroup.add(mesh);
+    }
+  }
   scene.add(plantGroup);
+}
+
+// One plant material. `v` holds nodes: uniforms for a single plant, vertex attributes for a batch.
+// A batch mesh sits at the origin, so its positionNode returns world space; a single plant's
+// returns its own frame, as before.
+function plantMaterial(species, v, leafClamp, batch) {
+  const look = currentUniformsFor(species);
+  const mat = new MeshLambertNodeMaterial({ side: THREE.DoubleSide });
+  mat.colorNode = tankColor(attribute('color', 'vec3').mul(v.tint));
+  // The sway happens along a WORLD direction, because a current has one direction and everything
+  // standing in it leans the same way. The mesh is spun by its own `rotationY`, so the world
+  // heading has to be turned back into the plant's frame or each plant drifts its own way --
+  // which is what a breeze looks like, not water.
+  //
+  // R(-theta) applied to the heading. With heading (1, 0) this is the (cos, sin) the previous
+  // version hard-coded, so it is the same law generalised to a heading that can be steered.
+  mat.positionNode = Fn(() => {
+    const h = positionLocal.y.div(v.height);
+    // How far down the flow this plant stands. THE ONLY thing its phase may depend on -- a
+    // per-plant random phase is what had neighbours leaning opposite ways.
+    const downstream = dot(v.xz, uCurHeading);
+    const offset = currentOffsetNode(
+      downstream, h, uClock.add(v.roll.mul(uCurSyncSpan)),
+      look.sway, look.rate, look.stiffness,
+    ).mul(v.sway);
+    const axis = vec2(
+      uCurHeading.x.mul(v.rot.x).sub(uCurHeading.y.mul(v.rot.y)),
+      uCurHeading.x.mul(v.rot.y).add(uCurHeading.y.mul(v.rot.x)),
+    );
+    const lx = positionLocal.x.add(offset.mul(axis.x)).add(v.lean.mul(h.clamp(0, 1).pow(1.5)));
+    const lz = positionLocal.z.add(offset.mul(axis.y));
+    // Toggle off builds the shader without the clamp at all, so its cost can be measured.
+    if (!leafClamp && !batch) return vec3(lx, positionLocal.y, lz);
+    // World offset from the plant's foot.
+    let wx = lx.mul(v.rot.x).add(lz.mul(v.rot.y));
+    let wz = lx.mul(v.rot.y).negate().add(lz.mul(v.rot.x));
+    // Backstop for the live current sliders, which re-place nothing: hold the swayed vertex
+    // inside the glass. Placement already clears it at the settings the tank was built at.
+    if (leafClamp) {
+      wx = wx.add(v.xz.x).clamp(TANK.min[0] + 0.001, TANK.max[0] - 0.001).sub(v.xz.x);
+      wz = wz.add(v.xz.y).clamp(TANK.min[2] + 0.001, TANK.max[2] - 0.001).sub(v.xz.y);
+    }
+    if (batch) return vec3(wx.add(v.xz.x), positionLocal.y.add(v.y), wz.add(v.xz.y));
+    return vec3(wx.mul(v.rot.x).sub(wz.mul(v.rot.y)), positionLocal.y, wx.mul(v.rot.y).add(wz.mul(v.rot.x)));
+  })();
+
+  const caustic = causticEmissive();
+  if (caustic) mat.emissiveNode = caustic;
+  return mat;
 }
 
 // ---- grass ----------------------------------------------------------------
@@ -1899,26 +1950,24 @@ function buildModelFish(f, entry) {
   applyModelLook({ fish: f, model, entry });
 
   const style = motionStyle(f.species);
+  // This animal's own beat, as plain numbers syncFish writes. The shared species materials read
+  // them per draw from the mesh being drawn (see `sharedSwimBody`).
   const body = {
-    uPhase: uniform(Math.random(), 'float'),
-    uAmp: uniform(0, 'float'),
-    uCurve: uniform(0, 'float'),
-    uTwist: uniform(0, 'float'),
-    lagCycles: BODY_WAVE_LAG_CYCLES,
-    // The nose is the +Z end of the model's own bounding box, and the body runs back from it. Both
-    // come from `pokemon-rig.js`, in the same space `positionLocal` is in after skinning.
-    noseZ: entry.noseZ,
-    length: Math.max(1e-6, entry.extent.z),
+    uPhase: { value: Math.random() },
+    uAmp: { value: 0 },
+    uCurve: { value: 0 },
+    uTwist: { value: 0 },
   };
 
-  // Own materials, so this animal has its own beat. The template's GLTFLoader materials are the
-  // source; `tankMaterialFor` rebuilds each one as a node material that the water can tint and the
-  // deformation can bend.
-  const owned = new Map();
+  // One set of materials per species, shared by every animal of it. The template's GLTFLoader
+  // materials are the source; `tankMaterialFor` rebuilds each one as a node material that the water
+  // can tint and the deformation can bend.
+  const owned = speciesMaterials(entry);
   model.traverse((o) => {
     if (!o.isMesh) return;
+    o.userData.swimBody = body;
     const swap = (m) => {
-      if (!owned.has(m)) owned.set(m, tankMaterialFor(m, body));
+      if (!owned.has(m)) owned.set(m, tankMaterialFor(m, sharedSwimBody(entry)));
       return owned.get(m);
     };
     o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
@@ -1949,7 +1998,7 @@ function buildModelFish(f, entry) {
     spineOut: spineBones ? { yaw: new Float64Array(spineBones.length), pitch: new Float64Array(spineBones.length) } : null,
     // Scattered, or a pair of Dratini swim in lockstep.
     spinePhase: Math.random(),
-    style, body, materials: [...owned.values()], ...initialPose(f),
+    style, body, ...initialPose(f),
   };
 }
 
@@ -2033,13 +2082,41 @@ function buildFish() {
 /**
  * Every material a fish OWNS, and only those.
  *
- * A model fish now owns its materials rather than sharing its species', because the deformation
- * needs this animal's own phase and turn. Its geometry and textures are still the template's and
- * must survive it.
+ * A model fish owns none: its materials are its species' (`speciesMaterials`), freed by
+ * `clearFish`. Its geometry and textures are the template's and must survive it too.
  */
 function disposeFishMaterials(r) {
   if (r.kind === 'procedural') r.mesh.material.dispose();
-  else for (const m of r.materials || []) m.dispose();
+}
+
+// Model-fish materials, one set per species template: source material -> tank material.
+const modelMaterials = new Map();
+function speciesMaterials(entry) {
+  if (!modelMaterials.has(entry)) modelMaterials.set(entry, new Map());
+  return modelMaterials.get(entry);
+}
+function disposeModelMaterials() {
+  for (const set of modelMaterials.values()) for (const m of set.values()) m.dispose();
+  modelMaterials.clear();
+  _swimBodies.clear();
+}
+
+// The swim uniforms of a species' shared materials. Each reads the drawn mesh's own `swimBody`,
+// updated per object, so fish sharing a material still bend on their own beat, shadow pass included.
+const _swimBodies = new Map();
+function sharedSwimBody(entry) {
+  if (_swimBodies.has(entry)) return _swimBodies.get(entry);
+  const per = (key) => uniform(0, 'float').onObjectUpdate(({ object }) => object?.userData.swimBody?.[key].value ?? 0);
+  const body = {
+    uPhase: per('uPhase'), uAmp: per('uAmp'), uCurve: per('uCurve'), uTwist: per('uTwist'),
+    lagCycles: BODY_WAVE_LAG_CYCLES,
+    // The nose is the +Z end of the model's own bounding box, and the body runs back from it. Both
+    // come from `pokemon-rig.js`, in the same space `positionLocal` is in after skinning.
+    noseZ: entry.noseZ,
+    length: Math.max(1e-6, entry.extent.z),
+  };
+  _swimBodies.set(entry, body);
+  return body;
 }
 
 /** Take one fish's mesh out of the tank, leaving everything shared alone. */
@@ -2111,6 +2188,7 @@ function clearFish() {
   }
   for (const geo of proceduralGeos.values()) geo.dispose();   // one geometry per species, shared
   proceduralGeos.clear();
+  disposeModelMaterials();
   fishMeshes = [];
 }
 
@@ -3736,12 +3814,18 @@ if (PROF) {
   profHud.style.cssText = 'position:fixed;left:8px;top:8px;margin:0;padding:6px 8px;background:#000a;color:#9fd;font:11px/1.35 monospace;z-index:9;pointer-events:none';
   document.body.appendChild(profHud);
   const meshesIn = (root) => { let n = 0; root?.traverse((o) => { if (o.isMesh) n++; }); return n; };
+  window.aquariumProf = { fishMeshes: () => fishMeshes };   // console probing, ?prof only
   setInterval(() => {
     const i = renderer.info;
     let fishMeshCount = 0;
-    for (const r of fishMeshes) fishMeshCount += meshesIn(r.mesh);
+    const fishMats = new Set();
+    for (const r of fishMeshes) {
+      fishMeshCount += meshesIn(r.mesh);
+      r.mesh.traverse((o) => { if (o.isMesh) [].concat(o.material).forEach((m) => fishMats.add(m)); });
+    }
     profHud.textContent =
       `meshes fish ${fishMeshCount}  plants ${meshesIn(plantGroup)}  hardscape ${meshesIn(hardscapeGroup)}  shadow every ${SHADOW_EVERY}\n` +
+      `materials fish ${fishMats.size}\n` +
       `frame ${prof.frame.toFixed(2)} ms  (${(1000 / Math.max(prof.frame, 1e-3)).toFixed(0)} fps)\n` +
       `cpu  sim ${prof.sim.toFixed(2)}  sync ${prof.sync.toFixed(2)}  submit ${prof.submit.toFixed(2)}\n` +
       `gpu  render ${prof.gpu.toFixed(2)} ms\n` +
